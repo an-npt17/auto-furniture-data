@@ -1,0 +1,60 @@
+# TODO: Use env variables for path prefix and production host
+
+services:
+  furniture-data-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - "linux/amd64"
+        - "linux/arm64"
+    ports:
+      - "${FURNITURE_DATA_PORT}:8000"
+    env_file:
+      - ".env"
+    depends_on:
+      furniture-data-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - furniture-data-app
+      - furniture-data-networks
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  furniture-data-postgres:
+    image: postgres:18-trixie
+    ports:
+      - "${FURNITURE_DATA_POSTGRES_PORT}:5432"
+    volumes:
+      - "postgres-data:/var/lib/postgresql"
+    env_file:
+      - ".env"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "PGPASSWORD=$${POSTGRES_PASSWORD} psql -U $${POSTGRES_USER} -d $${POSTGRES_DB} -c 'SELECT 1;'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - furniture-data-app
+
+networks:
+  furniture-data-app:
+    name: furniture-data-app-net
+    driver: bridge
+  furniture-data-networks:
+    external: true
+
+volumes:
+  postgres-data:
+    name: furniture-data-postgres
+    driver: local

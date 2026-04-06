@@ -1,0 +1,49 @@
+# NOTE: For all authentication and validation,
+# use a random generated-string from `openssl rand -hex "bits"`,
+# "bits" can be 16 or 32
+
+authentication:
+  cors:
+    allow_ips: # Use `null` if not needed
+      - "xxx.yyy.zzz"
+    allow_origins: # Use `null` if not needed
+      - "http://localhost:3000"
+    allow_origins_regex: "https://.*.example.org"
+  api_key:
+    name: "X-API-KEY"
+    value: "your-api-key"
+
+database:
+  postgres:
+    host: "furniture-data-postgres"
+    internal_port: 5432
+    external_port: "${FURNITURE_DATA_POSTGRES_PORT}"
+    username: "${FURNITURE_DATA_POSTGRES_USER}"
+    password: "${FURNITURE_DATA_POSTGRES_PASSWORD}"
+    database: "furniture-data"
+
+  r2:
+    endpoint: "https://furniture-data.r2.cloudflarestorage.com"
+    access_key_id: "${FURNITURE_DATA_R2_ACCESS_KEY_ID}"
+    secret_access_key: "${FURNITURE_DATA_R2_SECRET_ACCESS_KEY}"
+    bucket_name: "furniture-data"
+    region: "auto"
+
+settings:
+  glb:
+    small-max-faces: 5000
+    normal-max-faces: 50000
+    big-max-faces: 200000
+  thumbnail:
+    format: "webp"
+    quality: 85
+  limits:
+    max_request_size: 10 # in MB
+    max_concurrent_requests: 100
+    max-upload-size: 500 # in MB
+
+app:
+  name: "furniture-data-crawler"
+  title: "CRUD for ETL - extract, transform and load furniture data"
+  description: "API for interacting with Database"
+  uvicorn_logging_format: "%(asctime)s %(levelname)s [%(name)s] [%(filename)s:%(lineno)d] - %(message)s"
