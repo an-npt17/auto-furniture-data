@@ -1,0 +1,59 @@
+[project]
+name = "auto-furniture-data"
+version = "0.1.0"
+description = "3D Object ETL System with FastAPI, PostgreSQL, and Cloudflare R2"
+readme = "README.md"
+requires-python = "==3.13.*"
+dependencies = [
+  "aiohttp==3.13.5",
+  "alembic==1.18.4",
+  "asyncpg==0.31.0",
+  "fastapi[standard]==0.135.2",
+  "psycopg2-binary==2.9.11",
+  "pydantic==2.12.5",
+  "pydantic-settings==2.8.1",
+  "sqlalchemy==2.0.38",
+  "numpy==2.2.2",
+  "python-multipart==0.0.20",
+  "trimesh==4.11.5",
+  "pillow==12.1.1",
+  "boto3-stubs==1.42.80",
+  "aioboto3==15.5.0",
+  "types-aioboto3[essential]==15.5.0",
+  "pyqt5>=5.15.11",
+]
+
+[dependency-groups]
+dev = ["basedpyright==1.38.4", "pyright>=1.1.408", "ruff==0.15.8"]
+
+[tool.ruff.lint]
+select = [
+  # Import sorting rules
+  "I",
+  # Pycodestyle rules (E, V)
+  "E",
+  # Tidy import rules
+  "TID",
+  # Perflint
+  "PERF",
+  # FastAPI specific rules
+  "FAST",
+]
+ignore = [
+  ### Intentionally disabled
+  # module level import not at top of file
+  "E402",
+  # line too long
+  "E501",
+  # do not assign a lambda expression, use a def
+  "E731",
+  # incorrect-dict-iterator, flags valid Series.items usage
+  "PERF102",
+  # try-except-in-loop, becomes useless in Python 3.11
+  "PERF203",
+]
+
+[tool.basedpyright]
+# if you want to add rules on allow untype libraries, you should add them to your own service's pyproject.toml
+reportAny = false
+reportExplicitAny = false

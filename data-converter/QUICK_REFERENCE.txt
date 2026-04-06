@@ -1,0 +1,200 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                  .max to FBX/GLB CONVERTER - QUICK REFERENCE                 ║
+║                      Preserves Hierarchy & Relationships                      ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ QUICK START (3 Methods)                                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ 1. EASIEST (Wrapper Script)
+    ./convert_max.sh house.max                    → house.fbx
+    ./convert_max.sh house.max house.glb          → house.glb
+    ./convert_max.sh house.max --format glb       → house.glb
+    ./convert_max.sh --gui                        → Launch GUI
+
+ 2. GUI MODE
+    python3 max_converter_gui.py
+    → Click, select, convert!
+
+ 3. DIRECT (Blender CLI)
+    blender --background --python max_to_fbx_preserve_hierarchy.py -- \
+        house.max house.fbx
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ COMMON USE CASES                                                             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ ★ House/Room Model (with many objects)
+   ./convert_max.sh house.max house.fbx
+   
+   Objects stay grouped:
+   ✓ Parent-child relationships preserved
+   ✓ Groups/collections maintained
+   ✓ Transforms kept intact
+
+ ★ Auto-Group by Object Names
+   ./convert_max.sh house.max --format fbx --group-by-name
+   
+   Living_Room_Chair_001 → Living_Room group
+   Living_Room_Table_001 → Living_Room group
+   Bedroom_Bed_001       → Bedroom group
+
+ ★ Batch Convert Directory
+   python3 batch_max_converter.py ./input/ ./output/ --format glb
+   
+   Converts all .max files, maintains folder structure
+
+ ★ For Unity/Unreal
+   ./convert_max.sh house.max house.fbx
+   → Import house.fbx into Unity/Unreal Assets
+
+ ★ For Web (Three.js, Babylon.js)
+   ./convert_max.sh house.max house.glb
+   → Use house.glb in your web app
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ FORMAT RECOMMENDATIONS                                                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ Target Platform          Format    Command
+ ─────────────────────────────────────────────────────────────────────────────
+ Unity                    FBX       ./convert_max.sh model.max --format fbx
+ Unreal Engine            FBX       ./convert_max.sh model.max --format fbx
+ Web (Three.js)           GLB       ./convert_max.sh model.max --format glb
+ Blender                  FBX/GLB   ./convert_max.sh model.max --format fbx
+ General Distribution     glTF      ./convert_max.sh model.max --format gltf
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ WHAT GETS PRESERVED                                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ ✅ PRESERVED                          ❌ NOT PRESERVED
+ ─────────────────────────────────────────────────────────────────────────────
+ Parent-child relationships            3ds Max modifiers (converted to mesh)
+ Object hierarchy                      3ds Max plugins
+ Groups and collections                Some procedural materials
+ Transforms (pos, rot, scale)          XRef objects
+ Materials and textures                
+ Animations                            
+ Cameras and lights                    
+ Empty objects (grouping)              
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ TROUBLESHOOTING                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ Problem: Objects still scattered after conversion
+ Solution: ./convert_max.sh house.max --group-by-name
+           Or convert to .3ds first (better compatibility)
+
+ Problem: Import failed - unsupported format
+ Solution: Convert .max to .3ds in 3ds Max first
+           Or use: python3 max_to_fbx_wine.py house.max house.fbx
+
+ Problem: Materials/textures missing
+ Solution: Copy texture files to same directory as .max file
+           Script auto-embeds textures
+
+ Problem: File too large / timeout
+ Solution: Edit scripts, increase timeout to 900+ seconds
+           Or split model into smaller parts
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ VERIFICATION                                                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ After conversion, verify hierarchy:
+
+ 1. Open in Blender GUI
+    blender house.fbx
+    
+ 2. Check Outliner panel (top-right)
+    Should show nested structure like:
+    
+    SceneRoot
+    ├─ Living_Room
+    │  ├─ Chair_001
+    │  ├─ Chair_002
+    │  └─ Table_001
+    └─ Kitchen
+       ├─ Counter_001
+       └─ Sink_001
+    
+    NOT a flat list!
+
+ 3. Test in target engine
+    - Unity: Drag FBX into Assets, check Prefab hierarchy
+    - Unreal: Import FBX, check Static Mesh hierarchy
+    - Web: Load GLB in online viewer (gltf-viewer.donmccurdy.com)
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ADVANCED OPTIONS                                                             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ Blender CLI (full control):
+ 
+ blender --background --python max_to_fbx_preserve_hierarchy.py -- \
+     INPUT OUTPUT [--group-by-name] [--format fbx|glb]
+
+ Batch with report:
+ 
+ python3 batch_max_converter.py input/ output/ --format glb
+ cat output/conversion_report.json
+
+ Custom Python script:
+ 
+ import bpy
+ bpy.ops.import_scene.fbx(filepath="house.fbx")
+ # Hierarchy preserved, access via bpy.data.objects
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ FILES CREATED                                                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ convert_max.sh                        Simple wrapper (recommended)
+ max_to_fbx_preserve_hierarchy.py     Main conversion script
+ batch_max_converter.py                Batch processing
+ max_converter_gui.py                  GUI interface
+ HIERARCHY_PRESERVATION_GUIDE.md       Full documentation
+ MAX_TO_FBX_GUIDE.md                   General conversion guide
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ EXAMPLES                                                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ # Single file
+ ./convert_max.sh modern_house.max
+ 
+ # Specify format
+ ./convert_max.sh modern_house.max --format glb
+ 
+ # Auto-group objects
+ ./convert_max.sh apartment.max --group-by-name
+ 
+ # Batch convert
+ python3 batch_max_converter.py ./houses/ ./converted_houses/ --format fbx
+ 
+ # Launch GUI
+ ./convert_max.sh --gui
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ GETTING HELP                                                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ 📖 Read guides:
+    cat HIERARCHY_PRESERVATION_GUIDE.md
+    cat MAX_TO_FBX_GUIDE.md
+
+ 🔧 Check script help:
+    ./convert_max.sh
+    python3 batch_max_converter.py --help
+
+ 🐛 Debug mode:
+    blender --python max_to_fbx_preserve_hierarchy.py -- input.max output.fbx
+    (Shows full Blender output)
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  TIP: Start with one test file to verify hierarchy preservation works!      ║
+║  Then batch convert your entire library.                                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝

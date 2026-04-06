@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLB Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .controls {
+            background: #2a2a2a;
+            padding: 1rem;
+            border-bottom: 1px solid #3a3a3a;
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        label {
+            font-size: 0.875rem;
+            color: #aaa;
+        }
+
+        input[type="file"],
+        input[type="text"] {
+            background: #1a1a1a;
+            border: 1px solid #3a3a3a;
+            color: #fff;
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+
+        input[type="text"] {
+            min-width: 300px;
+        }
+
+        input[type="color"] {
+            border: 1px solid #3a3a3a;
+            background: #1a1a1a;
+            cursor: pointer;
+            width: 40px;
+            height: 32px;
+            border-radius: 4px;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        #viewer-container {
+            flex: 1;
+            position: relative;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 2rem 3rem;
+            border-radius: 8px;
+            text-align: center;
+            z-index: 1000;
+            display: none;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #3a3a3a;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .loading-progress {
+            font-size: 0.875rem;
+            color: #aaa;
+        }
+
+        .info {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            max-width: 250px;
+        }
+
+        .info h3 {
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .info p {
+            margin: 0.25rem 0;
+            color: #aaa;
+        }
+
+        .separator {
+            width: 1px;
+            height: 24px;
+            background: #3a3a3a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <div class="control-group">
+                <label for="file-input">Upload GLB:</label>
+                <input type="file" id="file-input" accept=".glb,.gltf">
+            </div>
+
+            <div class="separator"></div>
+
+            <div class="control-group">
+                <label for="url-input">URL:</label>
+                <input type="text" id="url-input" placeholder="Enter GLB file URL or path">
+                <button type="button" id="load-button">Load</button>
+            </div>
+
+            <div class="separator"></div>
+
+            <div class="control-group">
+                <label for="bg-color">Background:</label>
+                <input type="color" id="bg-color" value="#2a2a2a">
+            </div>
+        </div>
+
+        <div id="viewer-container">
+            <div class="loading" id="loading-indicator">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Loading model...</div>
+                <div class="loading-progress" id="loading-progress">0%</div>
+            </div>
+            
+            <div class="info">
+                <h3>Controls</h3>
+                <p><strong>Rotate:</strong> Left mouse drag</p>
+                <p><strong>Pan:</strong> Right mouse drag</p>
+                <p><strong>Zoom:</strong> Mouse wheel</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/viewer.js"></script>
+</body>
+</html>
