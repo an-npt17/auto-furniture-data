@@ -17,7 +17,7 @@ export class Transformer {
       viewer.getCanvas()
     );
     this.controls.setMode('translate');
-    this.scene.add(this.controls);
+    this.scene.add(this.controls as unknown as THREE.Object3D);
 
     // Disable OrbitControls while dragging to prevent camera/gizmo conflict
     this.controls.addEventListener('dragging-changed', (event) => {
