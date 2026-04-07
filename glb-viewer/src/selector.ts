@@ -63,7 +63,9 @@ export class Selector {
 
     // Store original material and apply emissive highlight clone
     this.originalMaterial = mesh.material;
-    const base = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    const matArr = Array.isArray(mesh.material) ? mesh.material : null;
+    const base = matArr ? matArr[0] : mesh.material as THREE.Material;
+    if (!base) return;
     const highlighted = base.clone() as THREE.MeshStandardMaterial;
     if ('emissive' in highlighted) {
       highlighted.emissive = new THREE.Color(0x4488ff);
