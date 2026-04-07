@@ -16,7 +16,7 @@ const server = serve({
     if (url.pathname === "/viewer.js") {
       const file = Bun.file("src/viewer.ts");
       const transpiled = await Bun.build({
-        entrypoints: ["src/viewer.ts"],
+        entrypoints: ["src/main.ts"],
         outdir: "./build",
         target: "browser",
       });
