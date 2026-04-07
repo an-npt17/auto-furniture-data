@@ -1,203 +1,237 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GLB Viewer</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GLB Viewer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #1a1a1a;
-            color: #ffffff;
-            overflow: hidden;
-        }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a1a;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
 
-        .container {
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
+    /* ── Toolbar ── */
+    #toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: #252525;
+      border-bottom: 1px solid #333;
+      flex-shrink: 0;
+    }
 
-        .controls {
-            background: #2a2a2a;
-            padding: 1rem;
-            border-bottom: 1px solid #3a3a3a;
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-            align-items: center;
-        }
+    #toolbar .sep { width: 1px; height: 24px; background: #444; margin: 0 2px; }
 
-        .control-group {
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-        }
+    #toolbar button,
+    #toolbar label.file-btn {
+      padding: 5px 14px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background: #333;
+      color: #e0e0e0;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.15s;
+      user-select: none;
+    }
 
-        label {
-            font-size: 0.875rem;
-            color: #aaa;
-        }
+    #toolbar button:hover,
+    #toolbar label.file-btn:hover { background: #444; }
 
-        input[type="file"],
-        input[type="text"] {
-            background: #1a1a1a;
-            border: 1px solid #3a3a3a;
-            color: #fff;
-            padding: 0.5rem;
-            border-radius: 4px;
-            font-size: 0.875rem;
-        }
+    #toolbar button.active {
+      background: #2b5ee8;
+      border-color: #2b5ee8;
+      color: #fff;
+    }
 
-        input[type="text"] {
-            min-width: 300px;
-        }
+    #toolbar button:disabled {
+      opacity: 0.38;
+      cursor: not-allowed;
+    }
 
-        input[type="color"] {
-            border: 1px solid #3a3a3a;
-            background: #1a1a1a;
-            cursor: pointer;
-            width: 40px;
-            height: 32px;
-            border-radius: 4px;
-        }
+    /* ── Main area ── */
+    #main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
 
-        button {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.875rem;
-            transition: background 0.2s;
-        }
+    /* ── Sidebar ── */
+    #sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      background: #202020;
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
 
-        button:hover {
-            background: #0056b3;
-        }
+    .sidebar-section-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #777;
+      padding: 9px 12px 6px;
+      border-bottom: 1px solid #2a2a2a;
+    }
 
-        #viewer-container {
-            flex: 1;
-            position: relative;
-        }
+    #object-tree {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
 
-        .loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.8);
-            padding: 2rem 3rem;
-            border-radius: 8px;
-            text-align: center;
-            z-index: 1000;
-            display: none;
-        }
+    .tree-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: default;
+    }
 
-        .loading.active {
-            display: block;
-        }
+    .tree-row:hover { background: #2a2a2a; }
+    .tree-row.active { background: #1b3a72; }
 
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid #3a3a3a;
-            border-top: 4px solid #007bff;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 1rem;
-        }
+    .tree-row input[type="checkbox"] {
+      cursor: pointer;
+      accent-color: #4488ff;
+      flex-shrink: 0;
+    }
 
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+    .tree-row label {
+      cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      font-size: 12px;
+      color: #ccc;
+    }
 
-        .loading-text {
-            font-size: 1rem;
-            margin-bottom: 0.5rem;
-        }
+    .no-meshes {
+      padding: 10px 12px;
+      font-size: 11px;
+      color: #555;
+    }
 
-        .loading-progress {
-            font-size: 0.875rem;
-            color: #aaa;
-        }
+    /* ── Position panel ── */
+    #pos-section { border-top: 1px solid #2a2a2a; }
 
-        .info {
-            position: absolute;
-            top: 1rem;
-            right: 1rem;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 1rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            max-width: 250px;
-        }
+    #position-panel { padding: 8px 12px 10px; }
 
-        .info h3 {
-            margin-bottom: 0.5rem;
-            font-size: 1rem;
-        }
+    .no-active { font-size: 11px; color: #555; }
 
-        .info p {
-            margin: 0.25rem 0;
-            color: #aaa;
-        }
+    .pos-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
 
-        .separator {
-            width: 1px;
-            height: 24px;
-            background: #3a3a3a;
-        }
-    </style>
+    .pos-table th {
+      color: #777;
+      text-align: left;
+      padding: 2px 0;
+      width: 34px;
+      font-weight: normal;
+    }
+
+    .pos-table td {
+      color: #ccc;
+      text-align: right;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+    }
+
+    /* ── Viewport ── */
+    #viewer-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #viewer-container canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    /* ── Loading overlay ── */
+    #loading-indicator {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 14px;
+    }
+
+    #loading-indicator.active { display: flex; }
+
+    .loading-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #333;
+      border-top-color: #4488ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <div class="controls">
-            <div class="control-group">
-                <label for="file-input">Upload GLB:</label>
-                <input type="file" id="file-input" accept=".glb,.gltf">
-            </div>
 
-            <div class="separator"></div>
+  <div id="toolbar">
+    <input type="file" id="file-input" accept=".glb" style="display:none" />
+    <label for="file-input" class="file-btn">Load GLB</label>
+    <div class="sep"></div>
+    <button id="btn-translate" class="active">Translate</button>
+    <button id="btn-rotate">Rotate</button>
+    <div class="sep"></div>
+    <button id="btn-export-glb" disabled>Export GLB</button>
+    <button id="btn-export-json" disabled>Export JSON</button>
+  </div>
 
-            <div class="control-group">
-                <label for="url-input">URL:</label>
-                <input type="text" id="url-input" placeholder="Enter GLB file URL or path">
-                <button type="button" id="load-button">Load</button>
-            </div>
+  <div id="main">
 
-            <div class="separator"></div>
-
-            <div class="control-group">
-                <label for="bg-color">Background:</label>
-                <input type="color" id="bg-color" value="#2a2a2a">
-            </div>
+    <div id="sidebar">
+      <div class="sidebar-section-title">Objects</div>
+      <div id="object-tree">
+        <p class="no-meshes">Load a GLB file to begin</p>
+      </div>
+      <div id="pos-section">
+        <div class="sidebar-section-title">Position</div>
+        <div id="position-panel">
+          <p class="no-active">No mesh selected</p>
         </div>
-
-        <div id="viewer-container">
-            <div class="loading" id="loading-indicator">
-                <div class="loading-spinner"></div>
-                <div class="loading-text">Loading model...</div>
-                <div class="loading-progress" id="loading-progress">0%</div>
-            </div>
-            
-            <div class="info">
-                <h3>Controls</h3>
-                <p><strong>Rotate:</strong> Left mouse drag</p>
-                <p><strong>Pan:</strong> Right mouse drag</p>
-                <p><strong>Zoom:</strong> Mouse wheel</p>
-            </div>
-        </div>
+      </div>
     </div>
 
-    <script type="module" src="/viewer.js"></script>
+    <div id="viewer-container">
+      <div id="loading-indicator">
+        <div class="loading-spinner"></div>
+        <span>Loading...</span>
+        <span id="loading-progress"></span>
+      </div>
+    </div>
+
+  </div>
+
+  <script type="module" src="/viewer.js"></script>
 </body>
 </html>
