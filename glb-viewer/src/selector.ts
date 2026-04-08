@@ -1,29 +1,30 @@
 // src/selector.ts
-import * as THREE from 'three';
+import * as BABYLON from '@babylonjs/core';
 import type { GLBViewer } from './viewer';
 import type { SelectionStore } from './store';
 
 export class Selector {
-  private raycaster = new THREE.Raycaster();
-  private mouse = new THREE.Vector2();
-  private scene: THREE.Scene;
-  private camera: THREE.PerspectiveCamera;
+  private scene: BABYLON.Scene;
+  private camera: BABYLON.ArcRotateCamera;
   private canvas: HTMLCanvasElement;
   private store: SelectionStore;
-  private activeMesh: THREE.Mesh | null = null;
-  private originalMaterial: THREE.Material | THREE.Material[] | null = null;
-  private onSelectCallbacks: Array<(mesh: THREE.Mesh | null) => void> = [];
+  private activeMesh: BABYLON.AbstractMesh | null = null;
+  private highlightLayer: BABYLON.HighlightLayer;
+  private onSelectCallbacks: Array<(mesh: BABYLON.AbstractMesh | null) => void> = [];
 
   constructor(viewer: GLBViewer, store: SelectionStore) {
     this.scene = viewer.getScene();
     this.camera = viewer.getCamera();
     this.canvas = viewer.getCanvas();
     this.store = store;
+    
+    this.highlightLayer = new BABYLON.HighlightLayer("highlight", this.scene);
+    
     this.canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
   }
 
   /** Register a callback invoked when active selection changes. */
-  onSelect(cb: (mesh: THREE.Mesh | null) => void): void {
+  onSelect(cb: (mesh: BABYLON.AbstractMesh | null) => void): void {
     this.onSelectCallbacks.push(cb);
   }
 
@@ -32,64 +33,48 @@ export class Selector {
    * Called from panel tree label clicks.
    */
   setActive(uuid: string): void {
-    const obj = this.scene.getObjectByProperty('uuid', uuid);
-    if (obj && (obj as THREE.Mesh).isMesh) {
-      this.applySelection(obj as THREE.Mesh);
+    const mesh = this.scene.meshes.find(m => m.uniqueId.toString() === uuid);
+    if (mesh && mesh.metadata?.isSceneMesh) {
+      this.applySelection(mesh);
     }
   }
 
   private onPointerDown(event: PointerEvent): void {
-    const rect = this.canvas.getBoundingClientRect();
-    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-    this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersects = this.raycaster.intersectObjects(this.scene.children, true);
-
-    // Only hit meshes that belong to the loaded model (not gizmo helpers)
-    const hit = intersects.find(
-      i => (i.object as THREE.Mesh).isMesh && i.object.userData.isSceneMesh
+    const pickResult = this.scene.pick(event.clientX, event.clientY, 
+      (mesh) => mesh.metadata?.isSceneMesh === true
     );
 
-    if (hit) {
-      this.applySelection(hit.object as THREE.Mesh);
+    if (pickResult?.hit && pickResult.pickedMesh) {
+      this.applySelection(pickResult.pickedMesh);
     } else {
       this.clearActive();
     }
   }
 
-  private applySelection(mesh: THREE.Mesh): void {
-    this.restoreHighlight();
+  private applySelection(mesh: BABYLON.AbstractMesh): void {
+    this.clearHighlight();
 
-    // Store original material and apply emissive highlight clone
-    this.originalMaterial = mesh.material;
-    const matArr = Array.isArray(mesh.material) ? mesh.material : null;
-    const base = matArr ? matArr[0] : mesh.material as THREE.Material;
-    if (!base) return;
-    const highlighted = base.clone() as THREE.MeshStandardMaterial;
-    if ('emissive' in highlighted) {
-      highlighted.emissive = new THREE.Color(0x4488ff);
-      highlighted.emissiveIntensity = 0.4;
-    }
-    mesh.material = highlighted;
     this.activeMesh = mesh;
+    if (mesh instanceof BABYLON.Mesh) {
+      this.highlightLayer.addMesh(mesh, BABYLON.Color3.FromHexString("#4488ff"));
+    }
 
-    this.store.active = mesh.uuid;
-    this.store.checked.add(mesh.uuid);
-    this.onSelectCallbacks.forEach(cb => cb(mesh));
+    const uuid = mesh.uniqueId.toString();
+    this.store.active = uuid;
+    this.store.checked.add(uuid);
+    this.onSelectCallbacks.forEach(cb => { cb(mesh); });
   }
 
   private clearActive(): void {
-    this.restoreHighlight();
+    this.clearHighlight();
     this.store.active = null;
-    this.onSelectCallbacks.forEach(cb => cb(null));
+    this.onSelectCallbacks.forEach(cb => { cb(null); });
   }
 
-  private restoreHighlight(): void {
-    if (this.activeMesh && this.originalMaterial !== null) {
-      this.activeMesh.material = this.originalMaterial;
+  private clearHighlight(): void {
+    if (this.activeMesh) {
+      this.highlightLayer.removeMesh(this.activeMesh);
+      this.activeMesh = null;
     }
-    this.activeMesh = null;
-    this.originalMaterial = null;
   }
 }

@@ -1,5 +1,5 @@
 // src/panel.ts
-import * as THREE from 'three';
+import * as BABYLON from '@babylonjs/core';
 import type { SelectionStore } from './store';
 import type { Selector } from './selector';
 
@@ -13,14 +13,14 @@ export class Panel {
   private posEl: HTMLElement;
   private store: SelectionStore;
   private selector: Selector;
-  private scene: THREE.Scene;
+  private scene: BABYLON.Scene;
 
   constructor(
     treeEl: HTMLElement,
     posEl: HTMLElement,
     store: SelectionStore,
     selector: Selector,
-    scene: THREE.Scene
+    scene: BABYLON.Scene
   ) {
     this.treeEl = treeEl;
     this.posEl = posEl;
@@ -30,13 +30,17 @@ export class Panel {
   }
 
   /** Rebuild the object tree from the freshly loaded scene graph. */
-  buildTree(loadedScene: THREE.Group): void {
+  buildTree(rootNode: BABYLON.AbstractMesh): void {
     this.treeEl.innerHTML = '';
     this.store.checked.clear();
 
-    const meshes: THREE.Mesh[] = [];
-    loadedScene.traverse(obj => {
-      if ((obj as THREE.Mesh).isMesh) meshes.push(obj as THREE.Mesh);
+    const meshes: BABYLON.AbstractMesh[] = [];
+    
+    // Get all meshes from the scene that are tagged as scene meshes
+    this.scene.meshes.forEach(mesh => {
+      if (mesh.metadata?.isSceneMesh && mesh.name !== 'ground' && mesh.name !== '__root__') {
+        meshes.push(mesh);
+      }
     });
 
     if (meshes.length === 0) {
@@ -49,16 +53,23 @@ export class Panel {
 
       const row = document.createElement('div');
       row.className = 'tree-row';
-      row.dataset.uuid = mesh.uuid;
+      row.dataset.uuid = mesh.uniqueId.toString();
 
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
-      checkbox.id = `mesh-cb-${mesh.uuid}`;
+      checkbox.id = `mesh-cb-${mesh.uniqueId}`;
+      // Default to CHECKED (visible)
+      checkbox.checked = true;
+      this.store.checked.add(mesh.uniqueId.toString());
+      
       checkbox.addEventListener('change', () => {
+        const uuid = mesh.uniqueId.toString();
         if (checkbox.checked) {
-          this.store.checked.add(mesh.uuid);
+          this.store.checked.add(uuid);
+          mesh.setEnabled(true);
         } else {
-          this.store.checked.delete(mesh.uuid);
+          this.store.checked.delete(uuid);
+          mesh.setEnabled(false);
         }
         this.syncExportButtons();
       });
@@ -70,9 +81,11 @@ export class Panel {
       // Label click = activate (not just checkbox toggle)
       label.addEventListener('click', (e) => {
         e.preventDefault();
-        this.selector.setActive(mesh.uuid);
-        this.store.checked.add(mesh.uuid);
+        const uuid = mesh.uniqueId.toString();
+        this.selector.setActive(uuid);
+        this.store.checked.add(uuid);
         checkbox.checked = true;
+        mesh.setEnabled(true);
         this.syncExportButtons();
       });
 
@@ -80,6 +93,8 @@ export class Panel {
       row.appendChild(label);
       this.treeEl.appendChild(row);
     });
+    
+    this.syncExportButtons();
   }
 
   /** Highlight the tree row for the active UUID; clear all others. */
@@ -98,27 +113,24 @@ export class Panel {
       this.posEl.innerHTML = '<p class="no-active">No mesh selected</p>';
       return;
     }
-    const obj = this.scene.getObjectByProperty('uuid', this.store.active);
-    if (!obj) return;
+    
+    const mesh = this.scene.meshes.find(m => m.uniqueId.toString() === this.store.active);
+    if (!mesh) return;
 
-    const pos = new THREE.Vector3();
-    const quat = new THREE.Quaternion();
-    const euler = new THREE.Euler();
-    obj.getWorldPosition(pos);
-    obj.getWorldQuaternion(quat);
-    euler.setFromQuaternion(quat);
+    const pos = mesh.position;
+    const rot = mesh.rotation;
 
     const f = (n: number) => n.toFixed(3);
-    const deg = (n: number) => THREE.MathUtils.radToDeg(n).toFixed(1);
+    const deg = (n: number) => BABYLON.Tools.ToDegrees(n).toFixed(1);
 
     this.posEl.innerHTML = `
       <table class="pos-table">
         <tr><th>x</th><td>${f(pos.x)}</td></tr>
         <tr><th>y</th><td>${f(pos.y)}</td></tr>
         <tr><th>z</th><td>${f(pos.z)}</td></tr>
-        <tr><th>rx°</th><td>${deg(euler.x)}</td></tr>
-        <tr><th>ry°</th><td>${deg(euler.y)}</td></tr>
-        <tr><th>rz°</th><td>${deg(euler.z)}</td></tr>
+        <tr><th>rx°</th><td>${deg(rot.x)}</td></tr>
+        <tr><th>ry°</th><td>${deg(rot.y)}</td></tr>
+        <tr><th>rz°</th><td>${deg(rot.z)}</td></tr>
       </table>`;
   }
 

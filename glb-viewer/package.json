@@ -2,20 +2,23 @@
   "name": "glb-viewer",
   "version": "1.0.0",
   "module": "index.ts",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "start": "bun run index.ts",
-    "dev": "bun --hot run index.ts"
-  },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
+  "private": true,
+  "scripts": {
+    "start": "bun run index.ts",
+    "dev": "bun --hot run index.ts"
+  },
+  "type": "module",
   "dependencies": {
-    "@types/three": "^0.183.1",
-    "three": "^0.183.2"
+    "@babylonjs/core": "^9.1.0",
+    "@babylonjs/loaders": "^9.1.0",
+    "@babylonjs/serializers": "^9.1.0",
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/extensions": "^4.3.0"
   }
 }

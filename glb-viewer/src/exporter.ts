@@ -1,6 +1,6 @@
 // src/exporter.ts
-import * as THREE from 'three';
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import * as BABYLON from '@babylonjs/core';
+import { GLTF2Export } from '@babylonjs/serializers';
 import type { SelectionStore } from './store';
 
 export interface PositionEntry {
@@ -61,11 +61,10 @@ function showToast(message: string): void {
 }
 
 export class Exporter {
-  private scene: THREE.Scene;
+  private scene: BABYLON.Scene;
   private store: SelectionStore;
-  private gltfExporter = new GLTFExporter();
 
-  constructor(scene: THREE.Scene, store: SelectionStore) {
+  constructor(scene: BABYLON.Scene, store: SelectionStore) {
     this.scene = scene;
     this.store = store;
   }
@@ -73,51 +72,46 @@ export class Exporter {
   exportGLB(): void {
     if (this.store.checked.size === 0) return;
 
-    const exportScene = new THREE.Scene();
-    this.store.checked.forEach(uuid => {
-      const obj = this.scene.getObjectByProperty('uuid', uuid);
-      if (obj) exportScene.add(obj.clone());
-    });
-
-    this.gltfExporter.parse(
-      exportScene,
-      (result) => {
-        downloadBlob(
-          new Blob([result as ArrayBuffer], { type: 'model/gltf-binary' }),
-          'export.glb'
-        );
-      },
-      (error) => {
-        console.error('GLTFExporter error:', error);
-        showToast('GLB export failed: ' + String(error));
-      },
-      { binary: true }
+    const meshesToExport = this.scene.meshes.filter(mesh => 
+      this.store.checked.has(mesh.uniqueId.toString()) && mesh.metadata?.isSceneMesh
     );
+
+    if (meshesToExport.length === 0) {
+      showToast('No meshes to export');
+      return;
+    }
+
+    GLTF2Export.GLBAsync(this.scene, 'export', {
+      shouldExportNode: (node: BABYLON.Node) => meshesToExport.includes(node as any)
+    }).then((glb: any) => {
+      glb.downloadFiles();
+    }).catch((error: any) => {
+      console.error('GLB export error:', error);
+      showToast('GLB export failed: ' + String(error));
+    });
   }
 
   exportJSON(): void {
     if (this.store.checked.size === 0) return;
 
-    const worldPos = new THREE.Vector3();
-    const worldQuat = new THREE.Quaternion();
-    const euler = new THREE.Euler();
-
     const raws: RawEntry[] = [];
     let idx = 0;
+    
     this.store.checked.forEach(uuid => {
-      const obj = this.scene.getObjectByProperty('uuid', uuid);
-      if (!obj) return;
-      obj.getWorldPosition(worldPos);
-      obj.getWorldQuaternion(worldQuat);
-      euler.setFromQuaternion(worldQuat);
+      const mesh = this.scene.meshes.find(m => m.uniqueId.toString() === uuid);
+      if (!mesh) return;
+      
+      const pos = mesh.position;
+      const rot = mesh.rotation;
+      
       raws.push({
-        name: obj.name || `Mesh_${idx}`,
+        name: mesh.name || `Mesh_${idx}`,
         uuid,
-        position: { x: worldPos.x, y: worldPos.y, z: worldPos.z },
+        position: { x: pos.x, y: pos.y, z: pos.z },
         rotationDeg: {
-          x: THREE.MathUtils.radToDeg(euler.x),
-          y: THREE.MathUtils.radToDeg(euler.y),
-          z: THREE.MathUtils.radToDeg(euler.z),
+          x: BABYLON.Tools.ToDegrees(rot.x),
+          y: BABYLON.Tools.ToDegrees(rot.y),
+          z: BABYLON.Tools.ToDegrees(rot.z),
         },
       });
       idx++;

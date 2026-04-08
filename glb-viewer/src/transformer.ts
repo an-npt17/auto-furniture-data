@@ -1,45 +1,48 @@
 // src/transformer.ts
-import * as THREE from 'three';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import * as BABYLON from '@babylonjs/core';
 import type { GLBViewer } from './viewer';
 
 export type TransformMode = 'translate' | 'rotate';
 
 export class Transformer {
-  private controls: TransformControls;
-  private scene: THREE.Scene;
+  private gizmo: BABYLON.PositionGizmo | BABYLON.RotationGizmo | null = null;
+  private gizmoManager: BABYLON.GizmoManager;
+  private scene: BABYLON.Scene;
+  private currentMode: TransformMode = 'translate';
 
   constructor(viewer: GLBViewer) {
     this.scene = viewer.getScene();
-
-    this.controls = new TransformControls(
-      viewer.getCamera(),
-      viewer.getCanvas()
-    );
-    this.controls.setMode('translate');
-    this.scene.add(this.controls as unknown as THREE.Object3D);
-
-    // Disable OrbitControls while dragging to prevent camera/gizmo conflict
-    this.controls.addEventListener('dragging-changed', (event) => {
-      viewer.getOrbitControls().enabled = !(event as any).value;
-    });
+    
+    this.gizmoManager = new BABYLON.GizmoManager(this.scene);
+    this.gizmoManager.positionGizmoEnabled = true;
+    this.gizmoManager.rotationGizmoEnabled = false;
+    this.gizmoManager.scaleGizmoEnabled = false;
+    this.gizmoManager.boundingBoxGizmoEnabled = false;
+    this.gizmoManager.usePointerToAttachGizmos = false;
   }
 
-  /** Attach TransformControls to the object matching uuid. */
+  /** Attach gizmo to the mesh matching uuid. */
   attachTo(uuid: string): void {
-    const obj = this.scene.getObjectByProperty('uuid', uuid);
-    if (obj) {
-      this.controls.attach(obj as THREE.Object3D);
+    const mesh = this.scene.meshes.find(m => m.uniqueId.toString() === uuid);
+    if (mesh) {
+      this.gizmoManager.attachToMesh(mesh);
     }
   }
 
-  /** Detach TransformControls (call when nothing is active). */
+  /** Detach gizmo (call when nothing is active). */
   detach(): void {
-    this.controls.detach();
+    this.gizmoManager.attachToMesh(null);
   }
 
   /** Switch between 'translate' and 'rotate'. Scale is never exposed. */
   setMode(mode: TransformMode): void {
-    this.controls.setMode(mode);
+    this.currentMode = mode;
+    if (mode === 'translate') {
+      this.gizmoManager.positionGizmoEnabled = true;
+      this.gizmoManager.rotationGizmoEnabled = false;
+    } else {
+      this.gizmoManager.positionGizmoEnabled = false;
+      this.gizmoManager.rotationGizmoEnabled = true;
+    }
   }
 }

@@ -23,11 +23,12 @@ window.addEventListener('DOMContentLoaded', () => {
   const exporter = new Exporter(viewer.getScene(), store);
   const panel = new Panel(treeEl, posEl, store, selector, viewer.getScene());
 
-  // Viewport/tree selection → attach TransformControls + highlight tree row
+  // Viewport/tree selection → attach gizmo + highlight tree row
   selector.onSelect((mesh) => {
     if (mesh) {
-      transformer.attachTo(mesh.uuid);
-      panel.setActiveRow(mesh.uuid);
+      const uuid = mesh.uniqueId.toString();
+      transformer.attachTo(uuid);
+      panel.setActiveRow(uuid);
     } else {
       transformer.detach();
       panel.setActiveRow(null);
@@ -35,8 +36,8 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // Model loaded → rebuild sidebar tree, reset export buttons
-  viewer.onModelLoad((scene) => {
-    panel.buildTree(scene);
+  viewer.onModelLoad((rootMesh) => {
+    panel.buildTree(rootMesh);
     btnExportGlb.disabled = true;
     btnExportJson.disabled = true;
   });
