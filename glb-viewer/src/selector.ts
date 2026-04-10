@@ -73,7 +73,9 @@ export class Selector {
 
   private clearHighlight(): void {
     if (this.activeMesh) {
-      this.highlightLayer.removeMesh(this.activeMesh);
+      if (this.activeMesh instanceof BABYLON.Mesh) {
+        this.highlightLayer.removeMesh(this.activeMesh);
+      }
       this.activeMesh = null;
     }
   }

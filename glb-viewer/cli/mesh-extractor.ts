@@ -1,116 +1,233 @@
 // cli/mesh-extractor.ts
-import { Document, NodeIO, Node } from '@gltf-transform/core';
+import { Document, NodeIO, Node, Mesh } from '@gltf-transform/core';
+import type { Texture, TextureInfo } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-
-export interface MeshEntry {
-  name: string;
-  file: string;
-  position: { x: number; y: number; z: number };
-  rotation: { x: number; y: number; z: number };
-  scale: { x: number; y: number; z: number };
-}
+import { computeGroupSize, detectCategory } from './wall-size';
 
 export interface Manifest {
-  source: string;
-  meshes: MeshEntry[];
+  [groupName: string]: {
+    // [length, width, height] in meters — GLTF is Y-up, so X=length, Z=width, Y=height
+    size: [number, number, number];
+    category: 'wall' | 'furniture';
+    file_name: string;
+    location: { x: number; y: number; z: number };
+  };
 }
 
-function sanitizeName(name: string, index: number): string {
-  const base = name.trim() || `Mesh_${index}`;
-  return base.replace(/[^\w\-. ]/g, '_').replace(/\s+/g, '_');
+export interface WallEntry {
+  id: string;
+  name: string;
+  size: [number, number, number];
+  file_name: string;
 }
 
-function quatToEulerDeg(q: [number, number, number, number]): { x: number; y: number; z: number } {
-  const [x, y, z, w] = q;
+export interface SceneObjectEntry {
+  id: string;
+  name: string;
+  size: [number, number, number];
+  file_name: string;
+  category: 'furniture';
+  location: { x: number; y: number; z: number };
+}
 
-  const sinr_cosp = 2 * (w * x + y * z);
-  const cosr_cosp = 1 - 2 * (x * x + y * y);
-  const rx = Math.atan2(sinr_cosp, cosr_cosp);
+export interface SceneLocationEntry {
+  id: string;
+  ox: number;
+  oy: number;
+  oz: number;
+}
 
-  const sinp = 2 * (w * y - z * x);
-  const ry = Math.abs(sinp) >= 1 ? Math.sign(sinp) * (Math.PI / 2) : Math.asin(sinp);
+export interface RoomTemplateEntry {
+  id: string;
+  source_file: string;
+  wall_ids: string[];
+  scene_object_ids: string[];
+  wall_count: number;
+  scene_object_count: number;
+}
 
-  const siny_cosp = 2 * (w * z + x * y);
-  const cosy_cosp = 1 - 2 * (y * y + z * z);
-  const rz = Math.atan2(siny_cosp, cosy_cosp);
+export interface ExportMeshEntry {
+  name: string;
+  rootName: string;
+  node: Node;
+  location: { x: number; y: number; z: number };
+}
 
-  const toDeg = (r: number) => Math.round(r * (180 / Math.PI) * 10000) / 10000;
-  return { x: toDeg(rx), y: toDeg(ry), z: toDeg(rz) };
+function toFileName(name: string, fallbackIdx: number): string {
+  return (name.trim() || `${fallbackIdx}`).replace(/[/\\:*?"<>|]/g, '_');
+}
+
+function dedupeName(name: string, usedNames: Map<string, number>): string {
+  const count = usedNames.get(name) ?? 0;
+  usedNames.set(name, count + 1);
+  return count === 0 ? name : `${name}_${count}`;
 }
 
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
 
-/** Collect all nodes that have a mesh attached, across all scenes. */
-function collectMeshNodes(doc: Document): Node[] {
-  const nodes: Node[] = [];
-  for (const scene of doc.getRoot().listScenes()) {
-    scene.traverse((node) => {
-      if (node.getMesh()) nodes.push(node);
-    });
-  }
-  return nodes;
+function cloneTextureInto(out: Document, srcTexture: Texture): Texture {
+  const texture = out.createTexture(srcTexture.getName());
+  const image = srcTexture.getImage();
+  if (image) texture.setImage(image.slice());
+  const mimeType = srcTexture.getMimeType();
+  if (mimeType) texture.setMimeType(mimeType);
+  const uri = srcTexture.getURI();
+  if (uri) texture.setURI(uri);
+  return texture;
 }
 
-/** Build a new single-mesh Document copying the given node's mesh geometry + material factors. */
-function buildSingleMeshDocument(sourceNode: Node): Document {
-  const out = new Document();
-  const outBuffer = out.createBuffer();
-  const outScene = out.createScene('Scene');
+function copyTextureInfo(srcInfo: TextureInfo | null, outInfo: TextureInfo | null): void {
+  if (!srcInfo || !outInfo) return;
+  outInfo.setTexCoord(srcInfo.getTexCoord());
+  outInfo.setMagFilter(srcInfo.getMagFilter());
+  outInfo.setMinFilter(srcInfo.getMinFilter());
+  outInfo.setWrapS(srcInfo.getWrapS());
+  outInfo.setWrapT(srcInfo.getWrapT());
+}
 
-  const sourceMesh = sourceNode.getMesh()!;
-  const outMesh = out.createMesh(sourceMesh.getName());
+// ---
 
-  for (const prim of sourceMesh.listPrimitives()) {
-    const outPrim = out.createPrimitive();
+/**
+ * Resolve which nodes to treat as top-level groups.
+ * Keep scene top-level nodes as exported roots so their transforms are preserved.
+ */
+export function resolveGroupNodes(doc: Document): Node[] {
+  const groups: Node[] = [];
 
-    // Copy vertex attributes (POSITION, NORMAL, TEXCOORD_0, ...)
-    for (const semantic of prim.listSemantics()) {
-      const src = prim.getAttribute(semantic)!;
-      const srcArray = src.getArray()!;
-      const outAcc = out.createAccessor(src.getName())
-        .setBuffer(outBuffer)
-        .setType(src.getType())
-        .setArray(srcArray.slice() as typeof srcArray);
-      outPrim.setAttribute(semantic, outAcc);
+  for (const scene of doc.getRoot().listScenes()) {
+    groups.push(...scene.listChildren());
+  }
+  return groups;
+}
+
+export function resolveMeshEntries(doc: Document): ExportMeshEntry[] {
+  const entries: ExportMeshEntry[] = [];
+
+  const walk = (node: Node, rootName: string, rootLocation: { x: number; y: number; z: number }): void => {
+    if (node.getMesh()) {
+      entries.push({
+        name: node.getName(),
+        rootName,
+        node,
+        location: rootLocation,
+      });
     }
 
-    // Copy indices
+    for (const child of node.listChildren()) {
+      walk(child, rootName, rootLocation);
+    }
+  };
+
+  for (const scene of doc.getRoot().listScenes()) {
+    for (const root of scene.listChildren()) {
+      const [x, y, z] = root.getTranslation();
+      walk(root, root.getName(), { x: round4(x), y: round4(y), z: round4(z) });
+    }
+  }
+
+  return entries;
+}
+
+/** Copy a mesh (geometry + material, including textures) into the output document. */
+function copyMeshInto(out: Document, outBuffer: ReturnType<Document['createBuffer']>, src: Mesh): Mesh {
+  const outMesh = out.createMesh(src.getName());
+  for (const prim of src.listPrimitives()) {
+    const outPrim = out.createPrimitive();
+    for (const semantic of prim.listSemantics()) {
+      const acc = prim.getAttribute(semantic)!;
+      const arr = acc.getArray()!;
+      outPrim.setAttribute(
+        semantic,
+        out.createAccessor(acc.getName()).setBuffer(outBuffer).setType(acc.getType()).setArray(arr.slice() as typeof arr),
+      );
+    }
     const srcIdx = prim.getIndices();
     if (srcIdx) {
-      const srcArray = srcIdx.getArray()!;
-      const outIdx = out.createAccessor(srcIdx.getName())
-        .setBuffer(outBuffer)
-        .setType(srcIdx.getType())
-        .setArray(srcArray.slice() as typeof srcArray);
-      outPrim.setIndices(outIdx);
+      const arr = srcIdx.getArray()!;
+      outPrim.setIndices(
+        out.createAccessor(srcIdx.getName()).setBuffer(outBuffer).setType(srcIdx.getType()).setArray(arr.slice() as typeof arr),
+      );
     }
-
-    // Copy material factors (no textures — keeps output self-contained)
     const srcMat = prim.getMaterial();
     if (srcMat) {
       const outMat = out.createMaterial(srcMat.getName());
-      const base = srcMat.getBaseColorFactor();
-      outMat.setBaseColorFactor([...base] as [number, number, number, number]);
+      outMat.setBaseColorFactor([...srcMat.getBaseColorFactor()] as [number, number, number, number]);
       outMat.setAlphaMode(srcMat.getAlphaMode());
       outMat.setDoubleSided(srcMat.getDoubleSided());
       outMat.setMetallicFactor(srcMat.getMetallicFactor());
       outMat.setRoughnessFactor(srcMat.getRoughnessFactor());
+
+      const baseColorTexture = srcMat.getBaseColorTexture();
+      if (baseColorTexture) outMat.setBaseColorTexture(cloneTextureInto(out, baseColorTexture));
+
+      const emissiveTexture = srcMat.getEmissiveTexture();
+      if (emissiveTexture) outMat.setEmissiveTexture(cloneTextureInto(out, emissiveTexture));
+
+      const normalTexture = srcMat.getNormalTexture();
+      if (normalTexture) outMat.setNormalTexture(cloneTextureInto(out, normalTexture));
+
+      const occlusionTexture = srcMat.getOcclusionTexture();
+      if (occlusionTexture) outMat.setOcclusionTexture(cloneTextureInto(out, occlusionTexture));
+
+      const metallicRoughnessTexture = srcMat.getMetallicRoughnessTexture();
+      if (metallicRoughnessTexture) outMat.setMetallicRoughnessTexture(cloneTextureInto(out, metallicRoughnessTexture));
+
+      outMat.setEmissiveFactor([...srcMat.getEmissiveFactor()] as [number, number, number]);
+      outMat.setNormalScale(srcMat.getNormalScale());
+      outMat.setOcclusionStrength(srcMat.getOcclusionStrength());
+
+      copyTextureInfo(srcMat.getBaseColorTextureInfo(), outMat.getBaseColorTextureInfo());
+      copyTextureInfo(srcMat.getEmissiveTextureInfo(), outMat.getEmissiveTextureInfo());
+      copyTextureInfo(srcMat.getNormalTextureInfo(), outMat.getNormalTextureInfo());
+      copyTextureInfo(srcMat.getOcclusionTextureInfo(), outMat.getOcclusionTextureInfo());
+      copyTextureInfo(srcMat.getMetallicRoughnessTextureInfo(), outMat.getMetallicRoughnessTextureInfo());
       outPrim.setMaterial(outMat);
     }
-
     outMesh.addPrimitive(outPrim);
   }
+  return outMesh;
+}
 
-  const outNode = out.createNode(sourceNode.getName())
-    .setMesh(outMesh)
-    .setTranslation([...sourceNode.getTranslation()] as [number, number, number])
-    .setRotation([...sourceNode.getRotation()] as [number, number, number, number])
-    .setScale([...sourceNode.getScale()] as [number, number, number]);
+/** Recursively copy a node and its entire subtree into the output document. */
+function copyNodeTreeInto(
+  out: Document,
+  outBuffer: ReturnType<Document['createBuffer']>,
+  src: Node,
+  outParent: Node | ReturnType<Document['createScene']>,
+): void {
+  const outNode = out.createNode(src.getName())
+    .setTranslation([...src.getTranslation()] as [number, number, number])
+    .setRotation([...src.getRotation()] as [number, number, number, number])
+    .setScale([...src.getScale()] as [number, number, number]);
+  if (src.getMesh()) outNode.setMesh(copyMeshInto(out, outBuffer, src.getMesh()!));
+  outParent.addChild(outNode);
+  for (const child of src.listChildren()) copyNodeTreeInto(out, outBuffer, child, outNode);
+}
 
+/** Build a GLB Document for a single group node, preserving its internal hierarchy. */
+export function buildGroupDocument(groupNode: Node): Document {
+  const out = new Document();
+  const outBuffer = out.createBuffer();
+  const outScene = out.createScene('Scene');
+  copyNodeTreeInto(out, outBuffer, groupNode, outScene);
+  return out;
+}
+
+/** Build a GLB Document for a single mesh node. */
+export function buildMeshDocument(meshNode: Node): Document {
+  const out = new Document();
+  const outBuffer = out.createBuffer();
+  const outScene = out.createScene('Scene');
+  const outNode = out.createNode(meshNode.getName())
+    .setTranslation([...meshNode.getTranslation()] as [number, number, number])
+    .setRotation([...meshNode.getRotation()] as [number, number, number, number])
+    .setScale([...meshNode.getScale()] as [number, number, number]);
+  outNode.setExtras({ mesh_name: meshNode.getName() });
+  if (meshNode.getMesh()) outNode.setMesh(copyMeshInto(out, outBuffer, meshNode.getMesh()!));
   outScene.addChild(outNode);
   return out;
 }
@@ -121,56 +238,81 @@ export async function extractMeshes(inputPath: string, outputDir: string): Promi
   console.log(`Reading: ${inputPath}`);
   const doc = await io.read(inputPath);
 
-  const nodes = collectMeshNodes(doc);
-  if (nodes.length === 0) {
-    throw new Error('No meshes found in the input file.');
-  }
+  const meshEntries = resolveMeshEntries(doc);
+  if (meshEntries.length === 0) throw new Error('No mesh nodes found in the scene.');
+  console.log(`Found ${meshEntries.length} mesh node(s)`);
 
   await mkdir(outputDir, { recursive: true });
 
+  const manifest: Manifest = {};
+  const walls: WallEntry[] = [];
+  const sceneObjects: SceneObjectEntry[] = [];
+  const sceneLocations: SceneLocationEntry[] = [];
+  const roomTemplates: RoomTemplateEntry[] = [];
+  const sourceFile = path.basename(inputPath);
+  const roomId = path.basename(inputPath, path.extname(inputPath));
   const usedNames = new Map<string, number>();
-  const entries: MeshEntry[] = [];
 
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i]!;
-    const rawName = sanitizeName(node.getName() || node.getMesh()!.getName(), i);
-
-    // Deduplicate filenames
-    const count = usedNames.get(rawName) ?? 0;
-    usedNames.set(rawName, count + 1);
-    const uniqueName = count === 0 ? rawName : `${rawName}_${count}`;
-
-    const fileName = `${uniqueName}.glb`;
+  for (const [i, meshEntry] of meshEntries.entries()) {
+    const groupKey = dedupeName(toFileName(meshEntry.name, i), usedNames);
+    const fileName = `${groupKey}.glb`;
     const filePath = path.join(outputDir, fileName);
+    const size = computeGroupSize(meshEntry.node);
+    const location = meshEntry.location;
 
-    const meshDoc = buildSingleMeshDocument(node);
+    const meshDoc = buildMeshDocument(meshEntry.node);
     const glbBuffer = await io.writeBinary(meshDoc);
     await writeFile(filePath, glbBuffer);
 
-    const t = node.getTranslation();
-    const r = node.getRotation() as [number, number, number, number];
-    const s = node.getScale();
-    const rot = quatToEulerDeg(r);
+    manifest[groupKey] = {
+      size,
+      category: detectCategory(size),
+      file_name: fileName,
+      location,
+    };
 
-    entries.push({
-      name: uniqueName,
-      file: fileName,
-      position: { x: round4(t[0]), y: round4(t[1]), z: round4(t[2]) },
-      rotation: { x: rot.x, y: rot.y, z: rot.z },
-      scale: { x: round4(s[0]), y: round4(s[1]), z: round4(s[2]) },
-    });
+    if (manifest[groupKey].category === 'wall') {
+      walls.push({
+        id: groupKey,
+        name: meshEntry.node.getName(),
+        size,
+        file_name: fileName,
+      });
+    } else {
+      sceneObjects.push({
+        id: groupKey,
+        name: meshEntry.node.getName(),
+        size,
+        file_name: fileName,
+        category: 'furniture',
+        location,
+      });
+      sceneLocations.push({ id: groupKey, ox: location.x, oy: location.y, oz: location.z });
+    }
 
-    console.log(`  [${i + 1}/${nodes.length}] ${fileName}`);
+    process.stdout.write(`\r  [${i + 1}/${meshEntries.length}] ${fileName}             `);
   }
 
-  const manifest: Manifest = {
-    source: path.basename(inputPath),
-    meshes: entries,
-  };
+  console.log();
+
+  roomTemplates.push({
+    id: roomId,
+    source_file: sourceFile,
+    wall_ids: walls.map(wall => wall.id),
+    scene_object_ids: sceneObjects.map(object => object.id),
+    wall_count: walls.length,
+    scene_object_count: sceneObjects.length,
+  });
 
   const manifestPath = path.join(outputDir, 'manifest.json');
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-  console.log(`  manifest.json`);
+  console.log(`  → manifest.json written`);
+
+  await writeFile(path.join(outputDir, 'walls.json'), JSON.stringify(walls, null, 2));
+  await writeFile(path.join(outputDir, 'scene_objects.json'), JSON.stringify(sceneObjects, null, 2));
+  await writeFile(path.join(outputDir, 'scene_locations.json'), JSON.stringify(sceneLocations, null, 2));
+  await writeFile(path.join(outputDir, 'room_templates.json'), JSON.stringify(roomTemplates, null, 2));
+  console.log(`  → walls.json, scene_objects.json, scene_locations.json, room_templates.json written`);
 
   return manifest;
 }

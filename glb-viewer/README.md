@@ -1,14 +1,16 @@
 # GLB Viewer
 
-A simple, lightweight 3D model viewer for GLB/GLTF files built with TypeScript, Three.js, and Bun.
+A powerful 3D model viewer and scene composer for GLB/GLTF files built with TypeScript, Babylon.js, and Bun.
 
 ## Features
 
-- 🎨 Interactive 3D model viewing with orbit controls
-- 📁 Load models via file upload or URL
-- 🎨 Customizable background color
-- 🔄 Automatic model centering and scaling
-- ⚡ Fast development server powered by Bun
+- 🎨 **Interactive 3D Model Viewing** - Single model viewer with transform controls
+- 🏗️ **Scene Composer** - Load entire scenes from manifest.json with multiple objects
+- 📍 **Position Extraction** - Automatically extract and save object positions
+- 🔄 **Transform Objects** - Translate and rotate objects with gizmos
+- 📤 **Export** - Export modified scenes as GLB or JSON position data
+- 🗂️ **Mesh Extraction** - CLI tool to extract individual meshes from complex GLB files
+- ⚡ **Fast Development** - Powered by Bun runtime
 
 ## Prerequisites
 
@@ -24,51 +26,168 @@ bun install
 
 ## Usage
 
-1. Start the development server:
+### 1. Start the Development Server
 
 ```bash
-bun run index.ts
+bun run dev
 ```
 
-2. Open your browser and navigate to:
+This will start the server with hot reload enabled.
 
+### 2. Access the Viewers
+
+**Single Model Viewer** (Transform and export individual models)
 ```
-http://localhost:3000
+http://localhost:3000/
 ```
 
-3. Load a GLB model:
-   - **Upload**: Click "Upload GLB" and select a `.glb` file from your computer
-   - **URL**: Enter a URL to a GLB file (or local path like `/models/sample.glb`) and click "Load"
-   - **Models folder**: Place `.glb` files in the `models/` directory and load them via URL: `/models/your-file.glb`
+**Scene Viewer** (Load manifest.json with multiple objects)
+```
+http://localhost:3000/scene-viewer
+```
+
+### 3. Extract Meshes from GLB Files
+
+Use the CLI tool to extract individual meshes from complex GLB files:
+
+```bash
+bun cli/extract-meshes.ts <input.glb> [output-dir]
+```
+
+**Example:**
+```bash
+bun cli/extract-meshes.ts models/sample.glb output
+```
+
+This will:
+- Extract all meshes from `sample.glb`
+- Group similar meshes (e.g., `vase001`, `vase002` → `vase.glb`)
+- Calculate world positions for each object
+- Generate `manifest.json` with object locations
+- Save individual GLB files to the output directory
+
+### 3b. Blender Export Alternative
+
+If you prefer Blender's exporter, use `blender_export.py` with a `.glb` input:
+
+```bash
+blender --background --factory-startup --python blender_export.py -- input.glb output
+```
+
+This will:
+- Import `input.glb` into Blender
+- Export each mesh object as its own `.glb`
+- Write the same `manifest.json` and location files used by the viewer
+- Mesh exports use baked transforms, so their manifest locations stay at `0,0,0`
+
+If you omit the output path, it writes to a sibling `<input>_models` folder.
+
+**Grouping Logic:**
+- Objects with trailing numbers are grouped together (e.g., `Obj3d66-832905-131` through `Obj3d66-832905-186` → `Obj3d.glb`)
+- Position is calculated as the centroid of all grouped objects
+- Preserves object hierarchies and world transforms
+
+### 4. Load a Scene
+
+**In Scene Viewer:**
+1. Click "Load Folder"
+2. Select a folder containing:
+   - `manifest.json`
+   - Multiple `.glb` files
+3. All objects will be loaded at their correct positions
+4. Click on objects in the sidebar to highlight and focus them
 
 ## Controls
 
+**Single Model Viewer:**
 - **Rotate**: Left mouse button + drag
+- **Pan**: Right mouse button + drag  
+- **Zoom**: Mouse wheel scroll
+- **Transform**: Select object and use translate/rotate gizmos
+
+**Scene Viewer:**
+- **Orbit**: Left mouse button + drag
 - **Pan**: Right mouse button + drag
 - **Zoom**: Mouse wheel scroll
+- **Select**: Click object in sidebar to highlight and focus
 
 ## Project Structure
 
 ```
 glb-viewer/
+├── cli/
+│   ├── extract-meshes.ts      # CLI entry point for mesh extraction
+│   └── mesh-extractor.ts      # Core extraction logic
 ├── src/
-│   └── viewer.ts         # Main viewer logic (Three.js)
+│   ├── main.ts                # Single model viewer entry
+│   ├── scene-viewer.ts        # Scene viewer entry
+│   ├── viewer.ts              # Babylon.js viewer core
+│   ├── selector.ts            # Object selection
+│   ├── transformer.ts         # Transform gizmos
+│   ├── exporter.ts            # GLB/JSON export
+│   ├── panel.ts               # UI panel management
+│   └── store.ts               # Selection state
 ├── public/
-│   └── index.html        # Web interface
-├── models/               # Place your .glb files here
-├── index.ts              # Bun development server
+│   ├── index.html             # Single model viewer UI
+│   └── scene-viewer.html      # Scene viewer UI
+├── models/                    # Place your .glb files here
+├── output/                    # Extracted meshes output
+├── index.ts                   # Bun development server
 ├── package.json
 ├── tsconfig.json
 └── README.md
+```
+
+## Manifest Format
+
+The `manifest.json` file generated by the extraction tool has the following format:
+
+```json
+{
+  "ObjectName": {
+    "location": {
+      "x": 241.1797,
+      "y": 0.7532,
+      "z": 139.2708
+    },
+    "file_name": "ObjectName.glb"
+  }
+}
 ```
 
 ## Technologies
 
 - **Runtime**: [Bun](https://bun.sh)
 - **Language**: TypeScript
-- **3D Engine**: [Three.js](https://threejs.org)
-- **Loaders**: GLTFLoader
-- **Controls**: OrbitControls
+- **3D Engine**: [Babylon.js](https://www.babylonjs.com/)
+- **GLB Processing**: [glTF Transform](https://gltf-transform.donmccurdy.com/)
+- **Loaders**: Babylon.js GLTF Loader
+- **Serializers**: Babylon.js GLTF Serializer
+
+## Features in Detail
+
+### Single Model Viewer
+- Load individual GLB files
+- Interactive transform controls (translate/rotate)
+- Object tree view with checkboxes
+- Position/rotation display panel
+- Export selected objects as GLB
+- Export positions as JSON
+
+### Scene Viewer
+- Load entire scenes from manifest.json
+- All objects positioned correctly in world space
+- Object list with coordinates
+- Click to select and highlight objects
+- Camera auto-focus on selected objects
+- Ground grid for reference
+
+### Mesh Extraction Tool
+- Extracts all meshes from complex GLB files
+- Groups objects with similar names
+- Calculates world positions (handles hierarchy)
+- Generates manifest with positions
+- Strips trailing numbers for better grouping
 
 ## Finding GLB Models
 
@@ -81,7 +200,3 @@ You can find free GLB models from:
 ## License
 
 MIT
-
----
-
-This project was created using `bun init` in bun v1.3.10. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.

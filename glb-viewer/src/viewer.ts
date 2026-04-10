@@ -72,9 +72,12 @@ export class GLBViewer {
     window.addEventListener('resize', () => this.onWindowResize());
     
     this.engine.runRenderLoop(() => {
-      this.frameCallbacks.forEach(cb => cb());
+      for (const cb of this.frameCallbacks) {
+        cb();
+      }
       this.scene.render();
     });
+
   }
 
   getScene(): BABYLON.Scene { return this.scene; }

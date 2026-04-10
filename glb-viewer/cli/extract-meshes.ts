@@ -18,7 +18,7 @@ console.log(`Output: ${outputDir}`);
 
 extractMeshes(inputPath, outputDir)
   .then((manifest) => {
-    console.log(`\nDone — ${manifest.meshes.length} mesh(es) exported to: ${outputDir}`);
+    console.log(`\nDone — ${Object.keys(manifest).length} group(s) exported to: ${outputDir}`);
   })
   .catch((err) => {
     console.error('Error:', err.message);

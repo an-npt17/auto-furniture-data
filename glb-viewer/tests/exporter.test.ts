@@ -11,10 +11,11 @@ test("buildPositionEntries maps raw entries to PositionEntry shape", () => {
     },
   ]);
   expect(entries).toHaveLength(1);
-  expect(entries[0].name).toBe("Chair");
-  expect(entries[0].uuid).toBe("uuid-1");
-  expect(entries[0].position.x).toBe(1);
-  expect(entries[0].rotation.y).toBe(45);
+  const entry = entries[0]!;
+  expect(entry.name).toBe("Chair");
+  expect(entry.uuid).toBe("uuid-1");
+  expect(entry.position.x).toBe(1);
+  expect(entry.rotation.y).toBe(45);
 });
 
 test("buildPositionEntries rounds values to 4 decimal places", () => {
@@ -26,7 +27,7 @@ test("buildPositionEntries rounds values to 4 decimal places", () => {
       rotationDeg: { x: 0, y: 0, z: 0 },
     },
   ]);
-  expect(entries[0].position.x).toBe(1.2346);
+  expect(entries[0]!.position.x).toBe(1.2346);
 });
 
 test("buildPositionEntries handles empty array", () => {

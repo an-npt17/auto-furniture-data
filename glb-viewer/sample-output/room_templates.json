@@ -1,0 +1,10 @@
+[
+  {
+    "id": "room_001",
+    "source_file": "sample.glb",
+    "wall_ids": ["Wall_001"],
+    "scene_object_ids": ["Sofa_001", "Table_001"],
+    "wall_count": 1,
+    "scene_object_count": 2
+  }
+]

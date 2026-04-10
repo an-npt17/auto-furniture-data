@@ -1,0 +1,16 @@
+[
+  {
+    "id": "Sofa_001",
+    "name": "Sofa_001",
+    "size": [2.1, 0.9, 0.8],
+    "file_name": "Sofa_001.glb",
+    "category": "furniture"
+  },
+  {
+    "id": "Table_001",
+    "name": "Table_001",
+    "size": [1.4, 0.8, 0.75],
+    "file_name": "Table_001.glb",
+    "category": "furniture"
+  }
+]
