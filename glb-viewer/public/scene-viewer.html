@@ -43,6 +43,16 @@
       user-select: none;
     }
 
+    #toolbar select {
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background: #333;
+      color: #e0e0e0;
+      font-size: 13px;
+      min-width: 160px;
+    }
+
     #toolbar button:hover,
     #toolbar label.file-btn:hover { background: #444; }
 
@@ -176,6 +186,20 @@
     .object-item:hover { background: #2a2a2a; }
     .object-item.selected { background: #1b3a72; }
 
+    .object-item.group-row {
+      background: rgba(68, 136, 255, 0.08);
+      font-weight: 600;
+    }
+
+    .object-item.child-row {
+      padding-left: 26px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .object-item.child-row .name {
+      color: #b8c7e0;
+    }
+
     .object-item .name {
       flex: 1;
       overflow: hidden;
@@ -253,10 +277,10 @@
 <body>
 
   <div id="toolbar">
-    <input type="file" id="folder-input" webkitdirectory directory multiple style="display:none" />
-    <label for="folder-input" class="file-btn">Load Folder</label>
-    <button type="button" id="btn-load-output">Load Output Folder</button>
-    <button type="button" id="btn-bind-folder">Bind Folder</button>
+    <select id="folder-select">
+      <option value="">-- Select folder --</option>
+    </select>
+    <button type="button" id="btn-load-folder">Load</button>
     <div class="sep"></div>
     <label class="toggle">
       <input type="checkbox" id="toggle-presets" />
@@ -276,40 +300,32 @@
       <div class="sidebar-section-title">Objects (<span id="list-count">0</span>)</div>
       <div id="object-list">
         <div class="empty-state">
-          Click "Load Folder" and select the export folder containing:<br>
-          • manifest.json<br>
-          • matching .glb files
+          Select a folder with metadata.json and click "Load"
         </div>
       </div>
       <div id="details-panel" class="hidden">
         <h3>Metadata</h3>
         <div class="field">
-          <label for="field-label">Label</label>
-          <input id="field-label" type="text" />
-        </div>
-        <div class="field">
-          <label for="field-file-name">File Name</label>
-          <input id="field-file-name" type="text" />
-        </div>
-        <div class="field">
-          <label for="field-scale">Scale</label>
-          <input id="field-scale" type="text" placeholder="x, y, z" />
-        </div>
-        <div class="field">
-          <label for="field-location">Location</label>
-          <input id="field-location" type="text" placeholder="x, y, z" />
+          <label for="field-name">Name</label>
+          <input id="field-name" type="text" />
         </div>
         <div class="field">
           <label for="field-category">Category</label>
-          <select id="field-category">
-            <option value="furniture">furniture</option>
+          <input id="field-category" type="text" />
+        </div>
+        <div class="field">
+          <label for="field-placement-type">Placement Type</label>
+          <select id="field-placement-type">
+            <option value="floor">floor</option>
             <option value="wall">wall</option>
+            <option value="ceiling">ceiling</option>
+            <option value="table">table</option>
           </select>
         </div>
         <div class="details-actions">
-          <button id="btn-save-metadata" type="button">Save JSON</button>
-          <button id="btn-download-json" type="button">Download JSON</button>
+          <button id="btn-save-metadata" type="button">Save</button>
         </div>
+        <div id="save-status" style="font-size:11px; color:#6a6; margin-top:4px;"></div>
       </div>
     </div>
 
