@@ -119,6 +119,76 @@ def guess_category(size: Vector) -> str:
     return "furniture"
 
 
+def box_distance(
+    a_min: Vector, a_max: Vector, b_min: Vector, b_max: Vector, margin: float = 0.18
+) -> float:
+    dx = max(0.0, max(a_min.x - b_max.x, b_min.x - a_max.x) - margin)
+    dy = max(0.0, max(a_min.y - b_max.y, b_min.y - a_max.y) - margin)
+    dz = max(0.0, max(a_min.z - b_max.z, b_min.z - a_max.z) - margin)
+    return (dx * dx + dy * dy + dz * dz) ** 0.5
+
+
+def root_bounds(root: bpy.types.Object) -> tuple[Vector, Vector] | None:
+    return subtree_world_bounds(root)
+
+
+def cluster_furniture_roots(
+    roots: list[bpy.types.Object],
+) -> list[list[bpy.types.Object]]:
+    furniture: list[bpy.types.Object] = []
+    others: list[list[bpy.types.Object]] = []
+
+    for root in roots:
+        bounds = root_bounds(root)
+        if bounds is None:
+            others.append([root])
+            continue
+        min_v, max_v = bounds
+        if guess_category(max_v - min_v) == "furniture":
+            furniture.append(root)
+        else:
+            others.append([root])
+
+    clusters: list[list[bpy.types.Object]] = []
+    remaining = furniture[:]
+
+    while remaining:
+        seed = remaining.pop(0)
+        cluster = [seed]
+        expanded = True
+        while expanded:
+            expanded = False
+            for candidate in remaining[:]:
+                candidate_bounds = root_bounds(candidate)
+                if candidate_bounds is None:
+                    continue
+                c_min, c_max = candidate_bounds
+                if any(
+                    root_bounds(member) is not None
+                    and box_distance(*root_bounds(member), c_min, c_max) <= 0.45
+                    for member in cluster
+                ):
+                    cluster.append(candidate)
+                    remaining.remove(candidate)
+                    expanded = True
+        clusters.append(cluster)
+
+    return clusters + others
+
+
+def create_group_empty(scene: bpy.types.Scene, name: str) -> bpy.types.Object:
+    group_root = bpy.data.objects.new(name, None)
+    scene.collection.objects.link(group_root)
+    return group_root
+
+
+def parent_with_world_transform(
+    child: bpy.types.Object, parent: bpy.types.Object
+) -> None:
+    child.parent = parent
+    child.matrix_parent_inverse = parent.matrix_world.inverted()
+
+
 def is_generic_name(name: str) -> bool:
     lowered = name.lower()
     return (
@@ -127,6 +197,13 @@ def is_generic_name(name: str) -> bool:
         or lowered.startswith("mesh_")
         or lowered.startswith("object")
     )
+
+
+def base_group_name(name: str) -> str:
+    cleaned = re.sub(r"[._-]?\d+$", "", name).strip()
+    if not cleaned:
+        return name
+    return cleaned
 
 
 def metadata_name(obj: bpy.types.Object) -> str | None:
@@ -156,6 +233,17 @@ def resolve_group_name(root: bpy.types.Object, fallback_index: int) -> str:
         if root.name and not is_generic_name(root.name)
         else f"{fallback_index}"
     )
+
+
+def group_key_for_root(root: bpy.types.Object, fallback_index: int) -> str:
+    meta = resolve_group_name(root, fallback_index)
+    stem = base_group_name(meta)
+    return stem if stem else meta
+
+
+def group_label_for_root(root: bpy.types.Object, fallback_index: int) -> str:
+    meta = resolve_group_name(root, fallback_index)
+    return meta if meta else root.name
 
 
 def export_root(root: bpy.types.Object, out_path: Path) -> None:
@@ -193,6 +281,30 @@ def export_root_object(root: bpy.types.Object, out_path: Path) -> None:
     )
 
 
+def group_bounds(objects: list[bpy.types.Object]) -> tuple[Vector, Vector] | None:
+    points: list[Vector] = []
+    for root in objects:
+        bounds = subtree_world_bounds(root)
+        if bounds is None:
+            continue
+        min_v, max_v = bounds
+        points.extend([min_v, max_v])
+
+    if not points:
+        return None
+
+    min_v = Vector((float("inf"), float("inf"), float("inf")))
+    max_v = Vector((float("-inf"), float("-inf"), float("-inf")))
+    for point in points:
+        min_v.x = min(min_v.x, point.x)
+        min_v.y = min(min_v.y, point.y)
+        min_v.z = min(min_v.z, point.z)
+        max_v.x = max(max_v.x, point.x)
+        max_v.y = max(max_v.y, point.y)
+        max_v.z = max(max_v.z, point.z)
+    return min_v, max_v
+
+
 def clear_scene() -> None:
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
@@ -227,35 +339,49 @@ def main() -> int:
     if not roots:
         raise RuntimeError("No exportable root objects found in the current scene.")
 
+    clusters = cluster_furniture_roots(roots)
+
     manifest: dict[str, dict[str, object]] = {}
     walls: list[dict[str, object]] = []
     scene_objects: list[dict[str, object]] = []
     scene_locations: list[dict[str, float | str]] = []
     room_templates: list[dict[str, object]] = []
+    scene_groups: list[dict[str, object]] = []
     used_names: dict[str, int] = {}
+    grouped_roots: dict[str, list[bpy.types.Object]] = {}
     source_file = Path(bpy.data.filepath).name if bpy.data.filepath else "scene.blend"
     room_id = Path(bpy.data.filepath).stem if bpy.data.filepath else "scene"
 
-    for index, root in enumerate(roots):
-        group_key = dedupe_name(
-            sanitize_name(resolve_group_name(root, index), index), used_names
-        )
+    for index, cluster in enumerate(clusters):
+        if not cluster:
+            continue
+
+        cluster_name = group_key_for_root(cluster[0], index)
+        group_key = dedupe_name(sanitize_name(cluster_name, index), used_names)
         file_name = f"{group_key}.glb"
         file_path = output_dir / file_name
 
-        location = blender_to_gltf(root.matrix_world.translation)
-        bounds = subtree_world_bounds(root)
+        bounds = group_bounds(cluster)
         if bounds is None:
-            size = Vector((0.0, 0.0, 0.0))
+            min_v = Vector((0.0, 0.0, 0.0))
+            max_v = Vector((0.0, 0.0, 0.0))
         else:
             min_v, max_v = bounds
-            size = max_v - min_v
 
-        export_root_object(root, file_path)
+        center = (min_v + max_v) / 2
+        size = max_v - min_v
 
+        # Export the cluster as one parent object, preserving member transforms.
+        group_root = create_group_empty(bpy.context.scene, group_key)
+        for root in cluster:
+            parent_with_world_transform(root, group_root)
+
+        export_root_object(group_root, file_path)
+
+        location = blender_to_gltf(center)
         manifest[group_key] = {
             "size": [round4(size.x), round4(size.y), round4(size.z)],
-            "category": guess_category(size),
+            "category": "furniture",
             "file_name": file_name,
             "baked_transform": True,
             "world_location": {
@@ -270,36 +396,44 @@ def main() -> int:
             },
         }
 
-        if manifest[group_key]["category"] == "wall":
-            walls.append(
-                {
-                    "id": group_key,
-                    "name": root.name,
-                    "size": manifest[group_key]["size"],
-                    "file_name": file_name,
-                }
-            )
-        else:
-            scene_objects.append(
-                {
-                    "id": group_key,
-                    "name": root.name,
-                    "size": manifest[group_key]["size"],
-                    "file_name": file_name,
-                    "category": "furniture",
-                    "location": manifest[group_key]["location"],
-                }
-            )
-            scene_locations.append(
-                {
-                    "id": group_key,
-                    "ox": round4(location.x),
-                    "oy": round4(location.y),
-                    "oz": round4(location.z),
-                }
-            )
+        scene_objects.append(
+            {
+                "id": group_key,
+                "name": group_key,
+                "size": manifest[group_key]["size"],
+                "file_name": file_name,
+                "category": "furniture",
+                "location": manifest[group_key]["location"],
+            }
+        )
+        scene_locations.append(
+            {
+                "id": group_key,
+                "ox": round4(location.x),
+                "oy": round4(location.y),
+                "oz": round4(location.z),
+            }
+        )
+        scene_groups.append(
+            {
+                "id": group_key,
+                "label": group_key,
+                "children": [root.name for root in cluster],
+                "category": "furniture",
+                "location": {
+                    "x": round4(location.x),
+                    "y": round4(location.y),
+                    "z": round4(location.z),
+                },
+                "scale": {
+                    "x": round4(size.x),
+                    "y": round4(size.y),
+                    "z": round4(size.z),
+                },
+            }
+        )
 
-        print(f"[{index + 1}/{len(roots)}] {file_name}")
+        print(f"[{index + 1}/{len(clusters)}] {file_name}")
 
     room_templates.append(
         {
@@ -326,6 +460,9 @@ def main() -> int:
     )
     (output_dir / "room_templates.json").write_text(
         json.dumps(room_templates, indent=2), encoding="utf-8"
+    )
+    (output_dir / "scene_groups.json").write_text(
+        json.dumps(scene_groups, indent=2), encoding="utf-8"
     )
 
     print(f"Exported {len(roots)} object(s) to {output_dir}")

@@ -55,8 +55,34 @@ export interface ExportMeshEntry {
   location: { x: number; y: number; z: number };
 }
 
+export interface ResolvedMeshEntry extends ExportMeshEntry {
+  size: [number, number, number];
+  category: 'wall' | 'furniture';
+}
+
+export interface FurnitureCluster {
+  id: string;
+  members: ResolvedMeshEntry[];
+  location: { x: number; y: number; z: number };
+}
+
 function toFileName(name: string, fallbackIdx: number): string {
   return (name.trim() || `${fallbackIdx}`).replace(/[/\\:*?"<>|]/g, '_');
+}
+
+function resolveNodeName(node: Node): string {
+  const name = node.getName().trim();
+  if (name) return name;
+
+  const queue = [...node.listChildren()];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const currentName = current.getName().trim();
+    if (currentName) return currentName;
+    queue.push(...current.listChildren());
+  }
+
+  return '';
 }
 
 function dedupeName(name: string, usedNames: Map<string, number>): string {
@@ -130,6 +156,104 @@ export function resolveMeshEntries(doc: Document): ExportMeshEntry[] {
   }
 
   return entries;
+}
+
+export function resolveRootEntries(doc: Document): ExportMeshEntry[] {
+  const entries: ExportMeshEntry[] = [];
+
+  for (const scene of doc.getRoot().listScenes()) {
+    for (const root of scene.listChildren()) {
+      const [x, y, z] = root.getTranslation();
+      entries.push({
+        name: resolveNodeName(root),
+        rootName: root.getName(),
+        node: root,
+        location: { x: round4(x), y: round4(y), z: round4(z) },
+      });
+    }
+  }
+
+  return entries;
+}
+
+function shouldClusterTogether(a: ResolvedMeshEntry, b: ResolvedMeshEntry): boolean {
+  const dx = a.location.x - b.location.x;
+  const dy = a.location.y - b.location.y;
+  const dz = a.location.z - b.location.z;
+
+  const horizontalDistance = Math.hypot(dx, dz);
+  const sizeBoost = Math.max(a.size[0], a.size[1], b.size[0], b.size[1]);
+  const horizontalLimit = Math.min(4, Math.max(2.5, 2.5 + sizeBoost * 0.35));
+  const verticalLimit = Math.min(2, Math.max(1.2, 1.2 + Math.max(a.size[2], b.size[2]) * 0.25));
+
+  return horizontalDistance <= horizontalLimit && Math.abs(dy) <= verticalLimit;
+}
+
+function averageLocation(entries: ResolvedMeshEntry[]): { x: number; y: number; z: number } {
+  const total = entries.reduce(
+    (acc, entry) => {
+      acc.x += entry.location.x;
+      acc.y += entry.location.y;
+      acc.z += entry.location.z;
+      return acc;
+    },
+    { x: 0, y: 0, z: 0 },
+  );
+
+  const count = entries.length || 1;
+  return {
+    x: round4(total.x / count),
+    y: round4(total.y / count),
+    z: round4(total.z / count),
+  };
+}
+
+function unionFindClusters(entries: ResolvedMeshEntry[]): ResolvedMeshEntry[][] {
+  const parent = entries.map((_, i) => i);
+
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      const next = parent[i]!;
+      parent[i] = parent[next]!;
+      i = next;
+    }
+    return i;
+  };
+
+  const unite = (a: number, b: number): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      if (shouldClusterTogether(entries[i]!, entries[j]!)) unite(i, j);
+    }
+  }
+
+  const buckets = new Map<number, ResolvedMeshEntry[]>();
+  for (let i = 0; i < entries.length; i++) {
+    const root = find(i);
+    const bucket = buckets.get(root);
+    if (bucket) bucket.push(entries[i]!);
+    else buckets.set(root, [entries[i]!]);
+  }
+
+  return [...buckets.values()].map(group =>
+    group.slice().sort((a, b) => a.location.y - b.location.y || a.location.x - b.location.x || a.location.z - b.location.z),
+  );
+}
+
+export function clusterFurnitureEntries(entries: ResolvedMeshEntry[]): FurnitureCluster[] {
+  const furnitureEntries = entries.filter(entry => entry.category === 'furniture');
+  const clusters = unionFindClusters(furnitureEntries);
+
+  return clusters.map((members, index) => ({
+    id: `furniture_set_${String(index + 1).padStart(3, '0')}`,
+    members,
+    location: averageLocation(members),
+  }));
 }
 
 /** Copy a mesh (geometry + material, including textures) into the output document. */
@@ -217,6 +341,22 @@ export function buildGroupDocument(groupNode: Node): Document {
   return out;
 }
 
+/** Build a GLB Document for a furniture cluster, preserving each member subtree. */
+export function buildClusterDocument(clusterId: string, clusterNodes: Node[]): Document {
+  const out = new Document();
+  const outBuffer = out.createBuffer();
+  const outScene = out.createScene('Scene');
+  const clusterRoot = out.createNode(clusterId);
+  clusterRoot.setExtras({ cluster_id: clusterId });
+  outScene.addChild(clusterRoot);
+  for (const node of clusterNodes) copyNodeTreeInto(out, outBuffer, node, clusterRoot);
+  return out;
+}
+
+export function buildFurnitureClusterDocument(cluster: FurnitureCluster): Document {
+  return buildClusterDocument(cluster.id, cluster.members.map(member => member.node));
+}
+
 /** Build a GLB Document for a single mesh node. */
 export function buildMeshDocument(meshNode: Node): Document {
   const out = new Document();
@@ -238,9 +378,9 @@ export async function extractMeshes(inputPath: string, outputDir: string): Promi
   console.log(`Reading: ${inputPath}`);
   const doc = await io.read(inputPath);
 
-  const meshEntries = resolveMeshEntries(doc);
-  if (meshEntries.length === 0) throw new Error('No mesh nodes found in the scene.');
-  console.log(`Found ${meshEntries.length} mesh node(s)`);
+  const rootEntries = resolveRootEntries(doc);
+  if (rootEntries.length === 0) throw new Error('No scene root nodes found.');
+  console.log(`Found ${rootEntries.length} root node(s)`);
 
   await mkdir(outputDir, { recursive: true });
 
@@ -252,45 +392,76 @@ export async function extractMeshes(inputPath: string, outputDir: string): Promi
   const sourceFile = path.basename(inputPath);
   const roomId = path.basename(inputPath, path.extname(inputPath));
   const usedNames = new Map<string, number>();
+  const resolvedEntries: ResolvedMeshEntry[] = rootEntries.map((rootEntry, i) => {
+    const size = computeGroupSize(rootEntry.node);
+    return {
+      ...rootEntry,
+      name: toFileName(rootEntry.name, i),
+      size,
+      category: detectCategory(size),
+    };
+  });
 
-  for (const [i, meshEntry] of meshEntries.entries()) {
-    const groupKey = dedupeName(toFileName(meshEntry.name, i), usedNames);
+  const wallEntries = resolvedEntries.filter(entry => entry.category === 'wall');
+  const furnitureClusters = clusterFurnitureEntries(resolvedEntries);
+
+  for (const [i, wallEntry] of wallEntries.entries()) {
+    const groupKey = dedupeName(wallEntry.name, usedNames);
     const fileName = `${groupKey}.glb`;
     const filePath = path.join(outputDir, fileName);
-    const size = computeGroupSize(meshEntry.node);
-    const location = meshEntry.location;
+    const location = wallEntry.location;
 
-    const meshDoc = buildMeshDocument(meshEntry.node);
-    const glbBuffer = await io.writeBinary(meshDoc);
+    const wallDoc = buildGroupDocument(wallEntry.node);
+    const glbBuffer = await io.writeBinary(wallDoc);
     await writeFile(filePath, glbBuffer);
 
     manifest[groupKey] = {
-      size,
-      category: detectCategory(size),
+      size: wallEntry.size,
+      category: 'wall',
       file_name: fileName,
       location,
     };
 
-    if (manifest[groupKey].category === 'wall') {
-      walls.push({
-        id: groupKey,
-        name: meshEntry.node.getName(),
-        size,
-        file_name: fileName,
-      });
-    } else {
-      sceneObjects.push({
-        id: groupKey,
-        name: meshEntry.node.getName(),
-        size,
-        file_name: fileName,
-        category: 'furniture',
-        location,
-      });
-      sceneLocations.push({ id: groupKey, ox: location.x, oy: location.y, oz: location.z });
-    }
+    walls.push({
+      id: groupKey,
+      name: wallEntry.name,
+      size: wallEntry.size,
+      file_name: fileName,
+    });
 
-    process.stdout.write(`\r  [${i + 1}/${meshEntries.length}] ${fileName}             `);
+    process.stdout.write(`\r  [${i + 1}/${wallEntries.length}] ${fileName}             `);
+  }
+
+  if (wallEntries.length > 0) console.log();
+
+  for (const [i, cluster] of furnitureClusters.entries()) {
+    const fileName = `${cluster.id}.glb`;
+    const filePath = path.join(outputDir, fileName);
+    const clusterDoc = buildFurnitureClusterDocument(cluster);
+    const size = computeGroupSize(clusterDoc.getRoot().listScenes()[0]!.listChildren()[0]!);
+    const location = cluster.location;
+
+    const glbBuffer = await io.writeBinary(clusterDoc);
+    await writeFile(filePath, glbBuffer);
+
+    manifest[cluster.id] = {
+      size,
+      category: 'furniture',
+      file_name: fileName,
+      location,
+    };
+
+    sceneObjects.push({
+      id: cluster.id,
+      name: cluster.members[0]?.name ?? cluster.id,
+      size,
+      file_name: fileName,
+      category: 'furniture',
+      location,
+    });
+    sceneLocations.push({ id: cluster.id, ox: location.x, oy: location.y, oz: location.z });
+
+    process.stdout.write(`\r  [${i + 1}/${furnitureClusters.length}] ${fileName}             `);
   }
 
   console.log();
