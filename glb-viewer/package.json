@@ -11,7 +11,8 @@
   "private": true,
   "scripts": {
     "start": "bun run index.ts",
-    "dev": "bun --hot run index.ts"
+    "dev": "bun --hot run index.ts",
+    "compress:draco": "bun cli/compress-draco.ts"
   },
   "type": "module",
   "dependencies": {
@@ -20,6 +21,7 @@
     "@babylonjs/loaders": "^9.1.0",
     "@babylonjs/serializers": "^9.1.0",
     "@gltf-transform/core": "^4.3.0",
-    "@gltf-transform/extensions": "^4.3.0"
+    "@gltf-transform/extensions": "^4.3.0",
+    "draco3dgltf": "^1.5.7"
   }
 }
