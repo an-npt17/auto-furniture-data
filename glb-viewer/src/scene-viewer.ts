@@ -346,7 +346,7 @@ class UIController {
   private togglePresets: HTMLInputElement;
   private detailsPanel: HTMLElement;
   private fieldName: HTMLInputElement;
-  private fieldCategory: HTMLInputElement;
+  private fieldCategory: HTMLSelectElement;
   private fieldPlacementType: HTMLSelectElement;
   private btnSaveMetadata: HTMLButtonElement;
   private saveStatus: HTMLElement;
@@ -365,7 +365,7 @@ class UIController {
     this.togglePresets = document.getElementById('toggle-presets') as HTMLInputElement;
     this.detailsPanel = document.getElementById('details-panel') as HTMLElement;
     this.fieldName = document.getElementById('field-name') as HTMLInputElement;
-    this.fieldCategory = document.getElementById('field-category') as HTMLInputElement;
+    this.fieldCategory = document.getElementById('field-category') as HTMLSelectElement;
     this.fieldPlacementType = document.getElementById('field-placement-type') as HTMLSelectElement;
     this.btnSaveMetadata = document.getElementById('btn-save-metadata') as HTMLButtonElement;
     this.saveStatus = document.getElementById('save-status') as HTMLElement;
@@ -441,7 +441,7 @@ class UIController {
     // Apply form values to the entry
     this.viewer.updateEntry(this.activeId, {
       name: this.fieldName.value.trim(),
-      category: this.fieldCategory.value.trim(),
+      category: this.fieldCategory.value,
       placementType: this.fieldPlacementType.value,
     });
 
@@ -507,7 +507,9 @@ class UIController {
       item.appendChild(catSpan);
 
       item.addEventListener('click', () => {
-        this.objectList.querySelectorAll('.object-item').forEach(el => el.classList.remove('selected'));
+        this.objectList.querySelectorAll('.object-item').forEach(el => {
+          el.classList.remove('selected');
+        });
         item.classList.add('selected');
         this.viewer.selectObject(entry.id);
       });
