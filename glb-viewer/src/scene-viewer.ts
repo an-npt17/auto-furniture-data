@@ -1,6 +1,7 @@
-// src/scene-viewer.ts
-import * as BABYLON from "@babylonjs/core";
-import "@babylonjs/loaders";
+import * as THREE from "three";
+import { FlyControls } from "three/examples/jsm/controls/FlyControls.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 interface MetadataEntry {
   id: string;
@@ -14,13 +15,34 @@ interface MetadataEntry {
   position: { x: number; y: number; z: number };
 }
 
+type SceneMaterial = THREE.Material & {
+  color?: THREE.Color;
+  emissive?: THREE.Color;
+  emissiveIntensity?: number;
+  roughness?: number;
+  metalness?: number;
+  map?: THREE.Texture | null;
+  userData: {
+    baseColor?: THREE.Color;
+    baseEmissive?: THREE.Color;
+    baseEmissiveIntensity?: number;
+  };
+};
+
+const HIGHLIGHT_COLOR = new THREE.Color(0.2, 0.4, 0.8);
+
 class SceneViewer {
-  private engine: BABYLON.Engine;
-  private scene: BABYLON.Scene;
-  private camera!: BABYLON.FreeCamera;
+  private renderer: THREE.WebGLRenderer;
+  private scene: THREE.Scene;
+  private camera: THREE.PerspectiveCamera;
+  private controls: FlyControls;
+  private raycaster = new THREE.Raycaster();
+  private pointer = new THREE.Vector2();
+  private clock = new THREE.Clock();
+  private gltfLoader: GLTFLoader;
   private canvas: HTMLCanvasElement;
-  private loadedMeshes: Map<string, BABYLON.AbstractMesh[]> = new Map();
-  private loadedRoots: Map<string, BABYLON.TransformNode> = new Map();
+  private loadedMeshes: Map<string, THREE.Mesh[]> = new Map();
+  private loadedRoots: Map<string, THREE.Object3D> = new Map();
   private metadataEntries: MetadataEntry[] = [];
   private selectedId: string | null = null;
   private selectionListener: ((id: string | null) => void) | null = null;
@@ -44,7 +66,7 @@ class SceneViewer {
   }
 
   getEntry(id: string): MetadataEntry | undefined {
-    return this.metadataEntries.find((e) => e.id === id);
+    return this.metadataEntries.find((entry) => entry.id === id);
   }
 
   getCurrentFolder(): string | null {
@@ -52,143 +74,178 @@ class SceneViewer {
   }
 
   updateEntry(id: string, patch: Partial<MetadataEntry>): void {
-    const entry = this.metadataEntries.find((e) => e.id === id);
+    const entry = this.metadataEntries.find((item) => item.id === id);
     if (!entry) return;
     Object.assign(entry, patch);
   }
 
   constructor(canvasId: string) {
     this.canvas = document.getElementById(canvasId) as HTMLCanvasElement;
-    this.engine = new BABYLON.Engine(this.canvas, true, {
+
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas,
+      antialias: true,
+      alpha: false,
       preserveDrawingBuffer: true,
-      stencil: true,
     });
-    this.scene = new BABYLON.Scene(this.engine);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(
+      this.getViewportWidth(),
+      this.getViewportHeight(),
+      false,
+    );
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1;
+
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0xc8ccd9);
+
+    this.camera = new THREE.PerspectiveCamera(
+      50,
+      this.getAspectRatio(),
+      0.05,
+      5000,
+    );
+    this.camera.position.set(0, 2, -8);
+
+    this.controls = new FlyControls(this.camera, this.canvas);
+    this.controls.movementSpeed = 8;
+    this.controls.rollSpeed = 0;
+    this.controls.autoForward = false;
+    this.controls.dragToLook = true;
+
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath(
+      "https://www.gstatic.com/draco/versioned/decoders/1.5.6/",
+    );
+
+    this.gltfLoader = new GLTFLoader();
+    this.gltfLoader.setDRACOLoader(dracoLoader);
 
     this.setupScene();
-    this.setupCamera();
-    this.setupLights();
+    this.setupInteractions();
 
-    this.engine.runRenderLoop(() => this.scene.render());
-    window.addEventListener("resize", () => this.engine.resize());
+    this.renderer.setAnimationLoop(this.animate);
+    window.addEventListener("resize", this.handleResize);
+  }
+
+  private getViewportWidth(): number {
+    return this.canvas.clientWidth || window.innerWidth;
+  }
+
+  private getViewportHeight(): number {
+    return this.canvas.clientHeight || window.innerHeight;
+  }
+
+  private getAspectRatio(): number {
+    return this.getViewportWidth() / Math.max(this.getViewportHeight(), 1);
   }
 
   private setupScene(): void {
-    this.scene.clearColor = new BABYLON.Color4(0.8, 0.8, 0.85, 1);
+    const ambient = new THREE.HemisphereLight(0xffffff, 0x8c93a6, 1.1);
+    this.scene.add(ambient);
 
-    const ground = BABYLON.MeshBuilder.CreateGround(
-      "ground",
-      {
-        width: 1000,
-        height: 1000,
-        subdivisions: 2,
-      },
-      this.scene,
+    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.0);
+    dirLight1.position.set(6, 12, 5);
+    dirLight1.castShadow = true;
+    this.scene.add(dirLight1);
+
+    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.45);
+    dirLight2.position.set(-6, 8, -6);
+    this.scene.add(dirLight2);
+
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(1000, 1000),
+      new THREE.MeshStandardMaterial({
+        color: 0x66666f,
+        roughness: 1,
+        metalness: 0,
+      }),
     );
+    ground.rotation.x = -Math.PI / 2;
     ground.position.y = 0;
+    ground.receiveShadow = true;
+    ground.name = "ground";
+    this.scene.add(ground);
 
-    const groundMat = new BABYLON.StandardMaterial("groundMat", this.scene);
-    groundMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.45);
-    groundMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-    ground.material = groundMat;
-    ground.isPickable = false;
-    ground.receiveShadows = true;
+    const grid = new THREE.GridHelper(1000, 50, 0x80808a, 0x55555e);
+    grid.position.y = 0.01;
+    this.scene.add(grid);
+  }
 
-    const gridSize = 500;
-    const gridStep = gridSize / 50;
-    for (let i = -gridSize / 2; i <= gridSize / 2; i += gridStep) {
-      const lineX = BABYLON.MeshBuilder.CreateLines(
-        `gridX_${i}`,
-        {
-          points: [
-            new BABYLON.Vector3(i, 0.01, -gridSize / 2),
-            new BABYLON.Vector3(i, 0.01, gridSize / 2),
-          ],
-        },
-        this.scene,
-      );
-      lineX.color = new BABYLON.Color3(0.5, 0.5, 0.55);
-      lineX.isPickable = false;
+  private setupInteractions(): void {
+    this.canvas.addEventListener("click", this.handleCanvasClick);
+    this.canvas.addEventListener("wheel", this.handleWheel, { passive: false });
+    this.canvas.addEventListener("pointerdown", this.handlePointerDown);
+  }
 
-      const lineZ = BABYLON.MeshBuilder.CreateLines(
-        `gridZ_${i}`,
-        {
-          points: [
-            new BABYLON.Vector3(-gridSize / 2, 0.01, i),
-            new BABYLON.Vector3(gridSize / 2, 0.01, i),
-          ],
-        },
-        this.scene,
-      );
-      lineZ.color = new BABYLON.Color3(0.5, 0.5, 0.55);
-      lineZ.isPickable = false;
+  private handleResize = (): void => {
+    this.camera.aspect = this.getAspectRatio();
+    this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(
+      this.getViewportWidth(),
+      this.getViewportHeight(),
+      false,
+    );
+  };
+
+  private handleCanvasClick = (event: MouseEvent): void => {
+    this.updatePointer(event.clientX, event.clientY);
+    this.selectFromPointer();
+  };
+
+  private handlePointerDown = (event: PointerEvent): void => {
+    this.updatePointer(event.clientX, event.clientY);
+  };
+
+  private handleWheel = (event: WheelEvent): void => {
+    event.preventDefault();
+    const zoomFactor = Math.exp(event.deltaY * 0.0015);
+    this.camera.fov = THREE.MathUtils.clamp(
+      this.camera.fov * zoomFactor,
+      25,
+      75,
+    );
+    this.camera.updateProjectionMatrix();
+  };
+
+  private animate = (): void => {
+    const delta = Math.min(this.clock.getDelta(), 0.05);
+    this.controls.update(delta);
+    this.renderer.render(this.scene, this.camera);
+  };
+
+  private updatePointer(clientX: number, clientY: number): void {
+    const rect = this.canvas.getBoundingClientRect();
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
+  }
+
+  private selectFromPointer(): void {
+    if (this.loadedRoots.size === 0) return;
+
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const intersections = this.raycaster.intersectObjects(
+      Array.from(this.loadedRoots.values()),
+      true,
+    );
+
+    for (const hit of intersections) {
+      const objectId = this.findObjectIdFromObject(hit.object);
+      if (objectId) {
+        this.selectObject(objectId);
+        return;
+      }
     }
-
-    this.scene.onPointerObservable.add((pointerInfo) => {
-      if (pointerInfo.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
-      const pick = this.scene.pick(
-        this.scene.pointerX,
-        this.scene.pointerY,
-        (mesh) => mesh.isPickable,
-      );
-      if (!pick?.hit || !pick.pickedMesh) return;
-
-      const objectId = this.findObjectIdFromMesh(pick.pickedMesh);
-      if (objectId) this.selectObject(objectId);
-    });
   }
 
-  private setupCamera(): void {
-    this.camera = new BABYLON.FreeCamera(
-      "camera",
-      new BABYLON.Vector3(0, 2, -8),
-      this.scene,
-    );
-    this.camera.attachControl(this.canvas, true);
-    this.camera.speed = 0.5;
-    this.camera.angularSensibility = 3000;
-    this.camera.inertia = 0.7;
-    this.camera.minZ = 0.05;
-    this.camera.fov = 0.8;
-    this.camera.keysUp = [87, 38];
-    this.camera.keysDown = [83, 40];
-    this.camera.keysLeft = [65, 37];
-    this.camera.keysRight = [68, 39];
-    this.camera.inputs.addMouseWheel();
-  }
-
-  private setupLights(): void {
-    const hemi = new BABYLON.HemisphericLight(
-      "hemiLight",
-      new BABYLON.Vector3(0, 1, 0),
-      this.scene,
-    );
-    hemi.intensity = 1.2;
-    hemi.diffuse = new BABYLON.Color3(1, 1, 1);
-    hemi.groundColor = new BABYLON.Color3(0.6, 0.6, 0.7);
-
-    const dirLight1 = new BABYLON.DirectionalLight(
-      "dirLight1",
-      new BABYLON.Vector3(1, -1.5, 1),
-      this.scene,
-    );
-    dirLight1.position = new BABYLON.Vector3(-100, 100, -100);
-    dirLight1.intensity = 0.8;
-
-    const dirLight2 = new BABYLON.DirectionalLight(
-      "dirLight2",
-      new BABYLON.Vector3(-1, -1.5, -1),
-      this.scene,
-    );
-    dirLight2.position = new BABYLON.Vector3(100, 100, 100);
-    dirLight2.intensity = 0.6;
-  }
-
-  private findObjectIdFromMesh(mesh: BABYLON.AbstractMesh): string | null {
-    let node: BABYLON.Node | null = mesh;
+  private findObjectIdFromObject(object: THREE.Object3D): string | null {
+    let node: THREE.Object3D | null = object;
     while (node) {
-      const metadata = node.metadata as { objectId?: string } | undefined;
-      if (metadata?.objectId) return metadata.objectId;
+      const objectId = node.userData?.objectId;
+      if (typeof objectId === "string" && objectId.length > 0) return objectId;
       node = node.parent;
     }
     return null;
@@ -198,26 +255,26 @@ class SceneViewer {
     this.currentFolder = folder;
     const metadataURL = `/data/${folder}/metadata.json`;
     const response = await fetch(metadataURL);
-    if (!response.ok)
+    if (!response.ok) {
       throw new Error(`Failed to load metadata.json from ${folder}`);
+    }
 
-    const entries: MetadataEntry[] = await response.json();
+    const entries = (await response.json()) as MetadataEntry[];
     this.metadataEntries = entries;
 
     this.showLoading(true, `Loading ${entries.length} objects...`);
     let loaded = 0;
 
     for (const entry of entries) {
-      // modelUrl is like "/models/SomeName.glb" — the actual file is in the folder
       const fileName = entry.modelUrl.replace(/^\/models\//, "");
       const glbURL = `/data/${folder}/${encodeURIComponent(fileName)}`;
 
       try {
-        await this.loadGLB(entry.id, glbURL);
-        loaded++;
+        await this.loadGLB(entry, glbURL);
+        loaded += 1;
         this.updateLoadingProgress(`${loaded}/${entries.length} objects`);
-      } catch (err) {
-        console.warn(`Skipped ${entry.id}: ${(err as Error).message}`);
+      } catch (error) {
+        console.warn(`Skipped ${entry.id}: ${(error as Error).message}`);
       }
     }
 
@@ -225,107 +282,227 @@ class SceneViewer {
     this.focusCamera();
   }
 
-  private loadGLB(id: string, url: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      BABYLON.SceneLoader.ImportMesh(
-        "",
-        "",
-        url,
-        this.scene,
-        (meshes) => {
-          if (meshes.length === 0) {
-            reject(new Error("No meshes"));
-            return;
-          }
+  private async loadGLB(entry: MetadataEntry, url: string): Promise<void> {
+    const gltf = await this.gltfLoader.loadAsync(url);
+    const root = gltf.scene;
 
-          const root = new BABYLON.TransformNode(`${id}_root`, this.scene);
-          root.metadata = { objectId: id };
-          for (const mesh of meshes) {
-            if (mesh.parent === null) mesh.parent = root;
-            mesh.metadata = { objectId: id };
-          }
-          this.enhanceMaterials(meshes, id);
-          this.loadedRoots.set(id, root);
-          this.loadedMeshes.set(id, meshes);
-          resolve();
-        },
-        undefined,
-        (_scene, message) => reject(new Error(message)),
-      );
+    if (!root) {
+      throw new Error("No scene");
+    }
+
+    root.name = `${entry.id}_root`;
+    root.userData.objectId = entry.id;
+
+    const meshes: THREE.Mesh[] = [];
+
+    root.traverse((object: THREE.Object3D) => {
+      object.userData = { ...object.userData, objectId: entry.id };
+
+      if (object instanceof THREE.Mesh) {
+        meshes.push(object);
+        object.castShadow = true;
+        object.receiveShadow = true;
+        object.material = this.cloneMaterial(object.material, entry.id);
+        this.applyMaterialDefaults(object.material, entry.id);
+      }
     });
+
+    if (meshes.length === 0) {
+      throw new Error("No meshes");
+    }
+
+    this.scene.add(root);
+    this.loadedRoots.set(entry.id, root);
+    this.loadedMeshes.set(entry.id, meshes);
+    this.refreshSelectionState(entry.id);
   }
 
-  private enhanceMaterials(meshes: BABYLON.AbstractMesh[], id: string): void {
+  private cloneMaterial(
+    material: THREE.Material | THREE.Material[] | null,
+    id: string,
+  ): THREE.Material | THREE.Material[] {
+    if (Array.isArray(material)) {
+      return material.map((item) => this.cloneSingleMaterial(item, id));
+    }
+
+    if (material) {
+      return this.cloneSingleMaterial(material, id);
+    }
+
+    const fallback = new THREE.MeshStandardMaterial({
+      color: this.usePresetColors
+        ? this.colorFromHash(this.hashCode(id))
+        : 0xb8b8b8,
+      roughness: 0.8,
+      metalness: 0.05,
+    });
+    this.captureBaseMaterialState(fallback);
+    return fallback;
+  }
+
+  private cloneSingleMaterial(
+    material: THREE.Material,
+    id: string,
+  ): THREE.Material {
+    const cloned = material.clone();
+    this.captureBaseMaterialState(cloned as SceneMaterial);
+    return cloned;
+  }
+
+  private captureBaseMaterialState(material: SceneMaterial): void {
+    if (material.color) {
+      material.userData.baseColor = material.color.clone();
+    }
+    if (material.emissive) {
+      material.userData.baseEmissive = material.emissive.clone();
+    }
+    if (typeof material.emissiveIntensity === "number") {
+      material.userData.baseEmissiveIntensity = material.emissiveIntensity;
+    }
+  }
+
+  private applyMaterialDefaults(
+    material: THREE.Material | THREE.Material[],
+    id: string,
+  ): void {
+    const materials = Array.isArray(material) ? material : [material];
+
+    for (const item of materials) {
+      const typed = item as SceneMaterial;
+
+      if (
+        this.usePresetColors &&
+        typed.color &&
+        !typed.map &&
+        this.isWhiteColor(typed.color)
+      ) {
+        typed.color.copy(this.colorFromHash(this.hashCode(id)));
+      }
+
+      if (typeof typed.roughness === "number") {
+        typed.roughness = 0.7;
+      }
+
+      if (typeof typed.metalness === "number") {
+        typed.metalness = 0.1;
+      }
+
+      this.captureBaseMaterialState(typed);
+    }
+  }
+
+  private refreshSelectionState(id: string): void {
+    if (this.selectedId === id) {
+      this.setObjectHighlighted(id, true);
+    }
+  }
+
+  private setObjectHighlighted(id: string | null, highlighted: boolean): void {
+    if (!id) return;
+
+    const meshes = this.loadedMeshes.get(id);
+    if (!meshes) return;
+
     for (const mesh of meshes) {
-      if (!this.usePresetColors) continue;
-      if (mesh.material) {
-        const mat = mesh.material as
-          | BABYLON.PBRMaterial
-          | BABYLON.StandardMaterial;
-        if (mat instanceof BABYLON.StandardMaterial) {
-          if (!mat.diffuseTexture && mat.diffuseColor.equalsFloats(1, 1, 1)) {
-            mat.diffuseColor = this.colorFromHash(this.hashCode(id));
-          }
-          mat.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
-        } else if (mat instanceof BABYLON.PBRMaterial) {
-          if (!mat.albedoTexture && mat.albedoColor.equalsFloats(1, 1, 1)) {
-            mat.albedoColor = this.colorFromHash(this.hashCode(id));
-          }
-          mat.metallic = 0.1;
-          mat.roughness = 0.7;
-        }
-      } else if (this.usePresetColors) {
-        const defaultMat = new BABYLON.StandardMaterial(
-          `mat_${id}`,
-          this.scene,
-        );
-        defaultMat.diffuseColor = this.colorFromHash(this.hashCode(id));
-        defaultMat.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
-        mesh.material = defaultMat;
+      const materials = Array.isArray(mesh.material)
+        ? mesh.material
+        : [mesh.material];
+      for (const material of materials) {
+        this.applyHighlightToMaterial(material as SceneMaterial, highlighted);
       }
     }
   }
 
-  selectObject(id: string | null): void {
-    if (this.selectedId) {
-      const prevMeshes = this.loadedMeshes.get(this.selectedId);
-      if (prevMeshes) {
-        for (const mesh of prevMeshes) {
-          if (mesh.material)
-            (mesh.material as any).emissiveColor = new BABYLON.Color3(0, 0, 0);
+  private applyHighlightToMaterial(
+    material: SceneMaterial,
+    highlighted: boolean,
+  ): void {
+    if (material.emissive) {
+      if (highlighted) {
+        material.emissive.copy(HIGHLIGHT_COLOR);
+        if (typeof material.emissiveIntensity === "number") {
+          material.emissiveIntensity = Math.max(
+            0.8,
+            material.emissiveIntensity,
+          );
+        }
+      } else {
+        if (material.userData.baseEmissive) {
+          material.emissive.copy(material.userData.baseEmissive);
+        }
+        if (typeof material.userData.baseEmissiveIntensity === "number") {
+          material.emissiveIntensity = material.userData.baseEmissiveIntensity;
         }
       }
+      return;
+    }
+
+    if (!material.color) return;
+
+    if (highlighted) {
+      const baseColor = material.userData.baseColor ?? material.color.clone();
+      material.color.copy(baseColor).lerp(HIGHLIGHT_COLOR, 0.3);
+      return;
+    }
+
+    if (material.userData.baseColor) {
+      material.color.copy(material.userData.baseColor);
+    }
+  }
+
+  selectObject(id: string | null): void {
+    if (this.selectedId === id) {
+      this.selectionListener?.(id);
+      return;
+    }
+
+    if (this.selectedId) {
+      this.setObjectHighlighted(this.selectedId, false);
     }
 
     this.selectedId = id;
 
     if (id) {
-      const meshes = this.loadedMeshes.get(id);
-      if (meshes) {
-        for (const mesh of meshes) {
-          if (mesh.material)
-            (mesh.material as any).emissiveColor = new BABYLON.Color3(
-              0.2,
-              0.4,
-              0.8,
-            );
-        }
-      }
+      this.setObjectHighlighted(id, true);
     }
 
     this.selectionListener?.(id);
   }
 
+  isSelected(id: string): boolean {
+    return this.selectedId === id;
+  }
+
   clearScene(): void {
-    for (const meshes of this.loadedMeshes.values()) {
-      for (const mesh of meshes) mesh.dispose();
+    if (this.selectedId) {
+      this.setObjectHighlighted(this.selectedId, false);
     }
-    for (const root of this.loadedRoots.values()) root.dispose();
+
+    for (const root of this.loadedRoots.values()) {
+      this.scene.remove(root);
+      this.disposeObject(root);
+    }
+
     this.loadedMeshes.clear();
     this.loadedRoots.clear();
     this.metadataEntries = [];
     this.selectedId = null;
     this.currentFolder = null;
+    this.selectionListener?.(null);
+  }
+
+  private disposeObject(object: THREE.Object3D): void {
+    object.traverse((node: THREE.Object3D) => {
+      if (node instanceof THREE.Mesh) {
+        node.geometry.dispose();
+        const materials = Array.isArray(node.material)
+          ? node.material
+          : [node.material];
+        for (const material of materials) {
+          material.dispose();
+        }
+      }
+    });
   }
 
   resetCamera(): void {
@@ -333,35 +510,38 @@ class SceneViewer {
   }
 
   private focusCamera(): void {
-    if (this.loadedMeshes.size === 0) {
-      this.camera.position = new BABYLON.Vector3(0, 2, -8);
-      this.camera.setTarget(BABYLON.Vector3.Zero());
+    if (this.loadedRoots.size === 0) {
+      this.camera.position.set(0, 2, -8);
+      this.camera.lookAt(0, 0, 0);
       return;
     }
 
-    let min = new BABYLON.Vector3(Infinity, Infinity, Infinity);
-    let max = new BABYLON.Vector3(-Infinity, -Infinity, -Infinity);
+    const box = new THREE.Box3();
+    const temp = new THREE.Box3();
 
-    this.loadedMeshes.forEach((meshes) => {
-      meshes.forEach((mesh) => {
-        mesh.computeWorldMatrix(true);
-        const bounds = mesh.getBoundingInfo();
-        min = BABYLON.Vector3.Minimize(min, bounds.boundingBox.minimumWorld);
-        max = BABYLON.Vector3.Maximize(max, bounds.boundingBox.maximumWorld);
-      });
-    });
+    for (const root of this.loadedRoots.values()) {
+      temp.setFromObject(root);
+      if (!temp.isEmpty()) {
+        box.union(temp);
+      }
+    }
 
-    const center = BABYLON.Vector3.Center(min, max);
-    const diagonal = max.subtract(min).length();
+    if (box.isEmpty()) {
+      this.camera.position.set(0, 2, -8);
+      this.camera.lookAt(0, 0, 0);
+      return;
+    }
 
-    this.camera.position = center.add(
-      new BABYLON.Vector3(
-        0,
-        Math.max(diagonal * 0.25, 2),
-        -Math.max(diagonal * 0.75, 8),
-      ),
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const radius = Math.max(size.length() * 0.5, 1);
+
+    this.camera.position.set(
+      center.x,
+      center.y + Math.max(radius * 0.35, 2),
+      center.z - Math.max(radius * 1.8, 8),
     );
-    this.camera.setTarget(center);
+    this.camera.lookAt(center);
   }
 
   private showLoading(show: boolean, text = "Loading..."): void {
@@ -370,9 +550,10 @@ class SceneViewer {
     if (show) {
       textEl.textContent = text;
       overlay.classList.add("active");
-    } else {
-      overlay.classList.remove("active");
+      return;
     }
+
+    overlay.classList.remove("active");
   }
 
   private updateLoadingProgress(progress: string): void {
@@ -381,22 +562,25 @@ class SceneViewer {
 
   private hashCode(str: string): number {
     let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = (hash << 5) - hash + str.charCodeAt(i);
+    for (let index = 0; index < str.length; index += 1) {
+      hash = (hash << 5) - hash + str.charCodeAt(index);
       hash |= 0;
     }
     return Math.abs(hash);
   }
 
-  private colorFromHash(hash: number): BABYLON.Color3 {
+  private colorFromHash(hash: number): THREE.Color {
     const hue = (hash % 360) / 360;
-    const sat = 0.5 + (hash % 30) / 100;
-    const light = 0.5 + (hash % 20) / 100;
-    return BABYLON.Color3.FromHSV(hue * 360, sat, light);
+    const saturation = 0.5 + (hash % 30) / 100;
+    const lightness = 0.5 + (hash % 20) / 100;
+    return new THREE.Color().setHSL(hue, saturation, lightness);
+  }
+
+  private isWhiteColor(color: THREE.Color): boolean {
+    return color.r > 0.98 && color.g > 0.98 && color.b > 0.98;
   }
 }
 
-// ── UI Controller ──
 class UIController {
   private viewer: SceneViewer;
   private folderSelect: HTMLSelectElement;
@@ -458,22 +642,23 @@ class UIController {
   private async loadFolderList(): Promise<void> {
     try {
       const response = await fetch("/api/folders");
-      const folders: string[] = await response.json();
+      const folders = (await response.json()) as string[];
       this.folderSelect.innerHTML =
         '<option value="">-- Select folder --</option>';
+
       for (const folder of folders) {
         const option = document.createElement("option");
         option.value = folder;
         option.textContent = folder;
         this.folderSelect.appendChild(option);
       }
-      // Auto-select if only one folder
+
       if (folders.length === 1) {
         this.folderSelect.value = folders[0]!;
         void this.loadSelectedFolder();
       }
     } catch {
-      // ignore
+      // Ignore folder discovery failures.
     }
   }
 
@@ -486,8 +671,8 @@ class UIController {
       await this.viewer.loadMetadataFolder(folder);
       this.updateObjectList();
       this.updateObjectCount();
-    } catch (err) {
-      alert("Error loading folder: " + (err as Error).message);
+    } catch (error) {
+      alert("Error loading folder: " + (error as Error).message);
     }
   }
 
@@ -520,20 +705,25 @@ class UIController {
     );
   }
 
+  private syncSelectedListItem(id: string | null): void {
+    this.objectList.querySelectorAll(".object-item").forEach((element) => {
+      const item = element as HTMLElement;
+      item.classList.toggle("selected", item.dataset.objectId === id);
+    });
+  }
+
   private async saveCurrentEntry(): Promise<void> {
     if (!this.activeId) return;
 
     const folder = this.viewer.getCurrentFolder();
     if (!folder) return;
 
-    // Apply form values to the entry
     this.viewer.updateEntry(this.activeId, {
       name: this.fieldName.value.trim(),
       category: this.fieldCategory.value,
       placementType: this.fieldPlacementType.value,
     });
 
-    // Save to server
     try {
       const response = await fetch("/api/save-metadata", {
         method: "POST",
@@ -547,11 +737,10 @@ class UIController {
       if (response.ok) {
         this.saveStatus.textContent = "Saved!";
         this.saveStatus.style.color = "#6a6";
-        // Update the sidebar label
         this.updateObjectList();
       } else {
-        const err = await response.json();
-        this.saveStatus.textContent = `Error: ${err.error}`;
+        const err = (await response.json()) as { error?: string };
+        this.saveStatus.textContent = `Error: ${err.error ?? "Unknown error"}`;
         this.saveStatus.style.color = "#a66";
       }
     } catch {
@@ -584,6 +773,7 @@ class UIController {
       const item = document.createElement("div");
       item.className = "object-item";
       if (entry.id === this.activeId) item.classList.add("selected");
+      item.dataset.objectId = entry.id;
 
       const nameSpan = document.createElement("span");
       nameSpan.className = "name";
@@ -597,8 +787,8 @@ class UIController {
       item.appendChild(catSpan);
 
       item.addEventListener("click", () => {
-        this.objectList.querySelectorAll(".object-item").forEach((el) => {
-          el.classList.remove("selected");
+        this.objectList.querySelectorAll(".object-item").forEach((element) => {
+          element.classList.remove("selected");
         });
         item.classList.add("selected");
         this.viewer.selectObject(entry.id);
@@ -618,6 +808,7 @@ class UIController {
 
   private showDetails(id: string | null): void {
     this.activeId = id;
+    this.syncSelectedListItem(id);
     if (!id) {
       this.detailsPanel.classList.add("hidden");
       return;
@@ -637,7 +828,6 @@ class UIController {
   }
 }
 
-// ── Initialize ──
 window.addEventListener("DOMContentLoaded", () => {
   new UIController();
 });
