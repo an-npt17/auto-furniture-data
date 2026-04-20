@@ -1,7 +1,7 @@
 // src/panel.ts
-import * as BABYLON from '@babylonjs/core';
-import type { SelectionStore } from './store';
-import type { Selector } from './selector';
+import * as BABYLON from "@babylonjs/core";
+import type { SelectionStore } from "./store";
+import type { Selector } from "./selector";
 
 /** Pure function — exported for testing. */
 export function resolveMeshName(name: string, index: number): string {
@@ -20,7 +20,7 @@ export class Panel {
     posEl: HTMLElement,
     store: SelectionStore,
     selector: Selector,
-    scene: BABYLON.Scene
+    scene: BABYLON.Scene,
   ) {
     this.treeEl = treeEl;
     this.posEl = posEl;
@@ -31,14 +31,18 @@ export class Panel {
 
   /** Rebuild the object tree from the freshly loaded scene graph. */
   buildTree(rootNode: BABYLON.AbstractMesh): void {
-    this.treeEl.innerHTML = '';
+    this.treeEl.innerHTML = "";
     this.store.checked.clear();
 
     const meshes: BABYLON.AbstractMesh[] = [];
-    
+
     // Get all meshes from the scene that are tagged as scene meshes
-    this.scene.meshes.forEach(mesh => {
-      if (mesh.metadata?.isSceneMesh && mesh.name !== 'ground' && mesh.name !== '__root__') {
+    this.scene.meshes.forEach((mesh) => {
+      if (
+        mesh.metadata?.isSceneMesh &&
+        mesh.name !== "ground" &&
+        mesh.name !== "__root__"
+      ) {
         meshes.push(mesh);
       }
     });
@@ -51,18 +55,18 @@ export class Panel {
     meshes.forEach((mesh, idx) => {
       const name = resolveMeshName(mesh.name, idx);
 
-      const row = document.createElement('div');
-      row.className = 'tree-row';
+      const row = document.createElement("div");
+      row.className = "tree-row";
       row.dataset.uuid = mesh.uniqueId.toString();
 
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
       checkbox.id = `mesh-cb-${mesh.uniqueId}`;
       // Default to CHECKED (visible)
       checkbox.checked = true;
       this.store.checked.add(mesh.uniqueId.toString());
-      
-      checkbox.addEventListener('change', () => {
+
+      checkbox.addEventListener("change", () => {
         const uuid = mesh.uniqueId.toString();
         if (checkbox.checked) {
           this.store.checked.add(uuid);
@@ -74,12 +78,12 @@ export class Panel {
         this.syncExportButtons();
       });
 
-      const label = document.createElement('label');
+      const label = document.createElement("label");
       label.htmlFor = checkbox.id;
       label.textContent = name;
       label.title = name;
       // Label click = activate (not just checkbox toggle)
-      label.addEventListener('click', (e) => {
+      label.addEventListener("click", (e) => {
         e.preventDefault();
         const uuid = mesh.uniqueId.toString();
         this.selector.setActive(uuid);
@@ -93,14 +97,14 @@ export class Panel {
       row.appendChild(label);
       this.treeEl.appendChild(row);
     });
-    
+
     this.syncExportButtons();
   }
 
   /** Highlight the tree row for the active UUID; clear all others. */
   setActiveRow(uuid: string | null): void {
-    this.treeEl.querySelectorAll<HTMLElement>('.tree-row').forEach(row => {
-      row.classList.toggle('active', row.dataset.uuid === uuid);
+    this.treeEl.querySelectorAll<HTMLElement>(".tree-row").forEach((row) => {
+      row.classList.toggle("active", row.dataset.uuid === uuid);
     });
   }
 
@@ -113,8 +117,10 @@ export class Panel {
       this.posEl.innerHTML = '<p class="no-active">No mesh selected</p>';
       return;
     }
-    
-    const mesh = this.scene.meshes.find(m => m.uniqueId.toString() === this.store.active);
+
+    const mesh = this.scene.meshes.find(
+      (m) => m.uniqueId.toString() === this.store.active,
+    );
     if (!mesh) return;
 
     const pos = mesh.position;
@@ -136,8 +142,12 @@ export class Panel {
 
   private syncExportButtons(): void {
     const has = this.store.checked.size > 0;
-    const glbBtn = document.getElementById('btn-export-glb') as HTMLButtonElement | null;
-    const jsonBtn = document.getElementById('btn-export-json') as HTMLButtonElement | null;
+    const glbBtn = document.getElementById(
+      "btn-export-glb",
+    ) as HTMLButtonElement | null;
+    const jsonBtn = document.getElementById(
+      "btn-export-json",
+    ) as HTMLButtonElement | null;
     if (glbBtn) glbBtn.disabled = !has;
     if (jsonBtn) jsonBtn.disabled = !has;
   }

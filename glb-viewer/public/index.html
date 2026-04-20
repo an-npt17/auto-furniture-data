@@ -1,237 +1,264 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GLB Viewer</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GLB Viewer</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #1a1a1a;
-      color: #e0e0e0;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #1a1a1a;
+        color: #e0e0e0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
 
-    /* ── Toolbar ── */
-    #toolbar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      background: #252525;
-      border-bottom: 1px solid #333;
-      flex-shrink: 0;
-    }
+      /* ── Toolbar ── */
+      #toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #252525;
+        border-bottom: 1px solid #333;
+        flex-shrink: 0;
+      }
 
-    #toolbar .sep { width: 1px; height: 24px; background: #444; margin: 0 2px; }
+      #toolbar .sep {
+        width: 1px;
+        height: 24px;
+        background: #444;
+        margin: 0 2px;
+      }
 
-    #toolbar button,
-    #toolbar label.file-btn {
-      padding: 5px 14px;
-      border-radius: 4px;
-      border: 1px solid #444;
-      background: #333;
-      color: #e0e0e0;
-      cursor: pointer;
-      font-size: 13px;
-      transition: background 0.15s;
-      user-select: none;
-    }
+      #toolbar button,
+      #toolbar label.file-btn {
+        padding: 5px 14px;
+        border-radius: 4px;
+        border: 1px solid #444;
+        background: #333;
+        color: #e0e0e0;
+        cursor: pointer;
+        font-size: 13px;
+        transition: background 0.15s;
+        user-select: none;
+      }
 
-    #toolbar button:hover,
-    #toolbar label.file-btn:hover { background: #444; }
+      #toolbar button:hover,
+      #toolbar label.file-btn:hover {
+        background: #444;
+      }
 
-    #toolbar button.active {
-      background: #2b5ee8;
-      border-color: #2b5ee8;
-      color: #fff;
-    }
+      #toolbar button.active {
+        background: #2b5ee8;
+        border-color: #2b5ee8;
+        color: #fff;
+      }
 
-    #toolbar button:disabled {
-      opacity: 0.38;
-      cursor: not-allowed;
-    }
+      #toolbar button:disabled {
+        opacity: 0.38;
+        cursor: not-allowed;
+      }
 
-    /* ── Main area ── */
-    #main {
-      display: flex;
-      flex: 1;
-      overflow: hidden;
-    }
+      /* ── Main area ── */
+      #main {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+      }
 
-    /* ── Sidebar ── */
-    #sidebar {
-      width: 220px;
-      flex-shrink: 0;
-      background: #202020;
-      border-right: 1px solid #333;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
+      /* ── Sidebar ── */
+      #sidebar {
+        width: 220px;
+        flex-shrink: 0;
+        background: #202020;
+        border-right: 1px solid #333;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
 
-    .sidebar-section-title {
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: #777;
-      padding: 9px 12px 6px;
-      border-bottom: 1px solid #2a2a2a;
-    }
+      .sidebar-section-title {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #777;
+        padding: 9px 12px 6px;
+        border-bottom: 1px solid #2a2a2a;
+      }
 
-    #object-tree {
-      flex: 1;
-      overflow-y: auto;
-      padding: 4px 0;
-    }
+      #object-tree {
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px 0;
+      }
 
-    .tree-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 10px;
-      font-size: 12px;
-      cursor: default;
-    }
+      .tree-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        font-size: 12px;
+        cursor: default;
+      }
 
-    .tree-row:hover { background: #2a2a2a; }
-    .tree-row.active { background: #1b3a72; }
+      .tree-row:hover {
+        background: #2a2a2a;
+      }
+      .tree-row.active {
+        background: #1b3a72;
+      }
 
-    .tree-row input[type="checkbox"] {
-      cursor: pointer;
-      accent-color: #4488ff;
-      flex-shrink: 0;
-    }
+      .tree-row input[type="checkbox"] {
+        cursor: pointer;
+        accent-color: #4488ff;
+        flex-shrink: 0;
+      }
 
-    .tree-row label {
-      cursor: pointer;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      flex: 1;
-      font-size: 12px;
-      color: #ccc;
-    }
+      .tree-row label {
+        cursor: pointer;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+        font-size: 12px;
+        color: #ccc;
+      }
 
-    .no-meshes {
-      padding: 10px 12px;
-      font-size: 11px;
-      color: #555;
-    }
+      .no-meshes {
+        padding: 10px 12px;
+        font-size: 11px;
+        color: #555;
+      }
 
-    /* ── Position panel ── */
-    #pos-section { border-top: 1px solid #2a2a2a; }
+      /* ── Position panel ── */
+      #pos-section {
+        border-top: 1px solid #2a2a2a;
+      }
 
-    #position-panel { padding: 8px 12px 10px; }
+      #position-panel {
+        padding: 8px 12px 10px;
+      }
 
-    .no-active { font-size: 11px; color: #555; }
+      .no-active {
+        font-size: 11px;
+        color: #555;
+      }
 
-    .pos-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-      font-variant-numeric: tabular-nums;
-    }
+      .pos-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
 
-    .pos-table th {
-      color: #777;
-      text-align: left;
-      padding: 2px 0;
-      width: 34px;
-      font-weight: normal;
-    }
+      .pos-table th {
+        color: #777;
+        text-align: left;
+        padding: 2px 0;
+        width: 34px;
+        font-weight: normal;
+      }
 
-    .pos-table td {
-      color: #ccc;
-      text-align: right;
-      font-family: 'Courier New', monospace;
-      font-size: 11px;
-    }
+      .pos-table td {
+        color: #ccc;
+        text-align: right;
+        font-family: "Courier New", monospace;
+        font-size: 11px;
+      }
 
-    /* ── Viewport ── */
-    #viewer-container {
-      flex: 1;
-      position: relative;
-      overflow: hidden;
-    }
+      /* ── Viewport ── */
+      #viewer-container {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+      }
 
-    #viewer-container canvas {
-      display: block;
-      width: 100% !important;
-      height: 100% !important;
-    }
+      #viewer-container canvas {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+      }
 
-    /* ── Loading overlay ── */
-    #loading-indicator {
-      display: none;
-      position: absolute;
-      inset: 0;
-      background: rgba(0,0,0,0.55);
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      gap: 10px;
-      font-size: 14px;
-    }
+      /* ── Loading overlay ── */
+      #loading-indicator {
+        display: none;
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 10px;
+        font-size: 14px;
+      }
 
-    #loading-indicator.active { display: flex; }
+      #loading-indicator.active {
+        display: flex;
+      }
 
-    .loading-spinner {
-      width: 36px;
-      height: 36px;
-      border: 3px solid #333;
-      border-top-color: #4488ff;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
+      .loading-spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid #333;
+        border-top-color: #4488ff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
 
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
-</head>
-<body>
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="toolbar">
+      <input type="file" id="file-input" accept=".glb" style="display: none" />
+      <label for="file-input" class="file-btn">Load GLB</label>
+      <div class="sep"></div>
+      <button id="btn-translate" class="active">Translate</button>
+      <button id="btn-rotate">Rotate</button>
+      <div class="sep"></div>
+      <button id="btn-export-glb" disabled>Export GLB</button>
+      <button id="btn-export-json" disabled>Export JSON</button>
+    </div>
 
-  <div id="toolbar">
-    <input type="file" id="file-input" accept=".glb" style="display:none" />
-    <label for="file-input" class="file-btn">Load GLB</label>
-    <div class="sep"></div>
-    <button id="btn-translate" class="active">Translate</button>
-    <button id="btn-rotate">Rotate</button>
-    <div class="sep"></div>
-    <button id="btn-export-glb" disabled>Export GLB</button>
-    <button id="btn-export-json" disabled>Export JSON</button>
-  </div>
-
-  <div id="main">
-
-    <div id="sidebar">
-      <div class="sidebar-section-title">Objects</div>
-      <div id="object-tree">
-        <p class="no-meshes">Load a GLB file to begin</p>
+    <div id="main">
+      <div id="sidebar">
+        <div class="sidebar-section-title">Objects</div>
+        <div id="object-tree">
+          <p class="no-meshes">Load a GLB file to begin</p>
+        </div>
+        <div id="pos-section">
+          <div class="sidebar-section-title">Position</div>
+          <div id="position-panel">
+            <p class="no-active">No mesh selected</p>
+          </div>
+        </div>
       </div>
-      <div id="pos-section">
-        <div class="sidebar-section-title">Position</div>
-        <div id="position-panel">
-          <p class="no-active">No mesh selected</p>
+
+      <div id="viewer-container">
+        <div id="loading-indicator">
+          <div class="loading-spinner"></div>
+          <span>Loading...</span>
+          <span id="loading-progress"></span>
         </div>
       </div>
     </div>
 
-    <div id="viewer-container">
-      <div id="loading-indicator">
-        <div class="loading-spinner"></div>
-        <span>Loading...</span>
-        <span id="loading-progress"></span>
-      </div>
-    </div>
-
-  </div>
-
-  <script type="module" src="/viewer.js"></script>
-</body>
+    <script type="module" src="/viewer.js"></script>
+  </body>
 </html>

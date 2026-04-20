@@ -1,6 +1,6 @@
 // src/scene-viewer.ts
-import * as BABYLON from '@babylonjs/core';
-import '@babylonjs/loaders';
+import * as BABYLON from "@babylonjs/core";
+import "@babylonjs/loaders";
 
 interface MetadataEntry {
   id: string;
@@ -44,7 +44,7 @@ class SceneViewer {
   }
 
   getEntry(id: string): MetadataEntry | undefined {
-    return this.metadataEntries.find(e => e.id === id);
+    return this.metadataEntries.find((e) => e.id === id);
   }
 
   getCurrentFolder(): string | null {
@@ -52,7 +52,7 @@ class SceneViewer {
   }
 
   updateEntry(id: string, patch: Partial<MetadataEntry>): void {
-    const entry = this.metadataEntries.find(e => e.id === id);
+    const entry = this.metadataEntries.find((e) => e.id === id);
     if (!entry) return;
     Object.assign(entry, patch);
   }
@@ -70,20 +70,24 @@ class SceneViewer {
     this.setupLights();
 
     this.engine.runRenderLoop(() => this.scene.render());
-    window.addEventListener('resize', () => this.engine.resize());
+    window.addEventListener("resize", () => this.engine.resize());
   }
 
   private setupScene(): void {
     this.scene.clearColor = new BABYLON.Color4(0.8, 0.8, 0.85, 1);
 
-    const ground = BABYLON.MeshBuilder.CreateGround('ground', {
-      width: 1000,
-      height: 1000,
-      subdivisions: 2,
-    }, this.scene);
+    const ground = BABYLON.MeshBuilder.CreateGround(
+      "ground",
+      {
+        width: 1000,
+        height: 1000,
+        subdivisions: 2,
+      },
+      this.scene,
+    );
     ground.position.y = 0;
 
-    const groundMat = new BABYLON.StandardMaterial('groundMat', this.scene);
+    const groundMat = new BABYLON.StandardMaterial("groundMat", this.scene);
     groundMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.45);
     groundMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
     ground.material = groundMat;
@@ -93,22 +97,40 @@ class SceneViewer {
     const gridSize = 500;
     const gridStep = gridSize / 50;
     for (let i = -gridSize / 2; i <= gridSize / 2; i += gridStep) {
-      const lineX = BABYLON.MeshBuilder.CreateLines(`gridX_${i}`, {
-        points: [new BABYLON.Vector3(i, 0.01, -gridSize / 2), new BABYLON.Vector3(i, 0.01, gridSize / 2)],
-      }, this.scene);
+      const lineX = BABYLON.MeshBuilder.CreateLines(
+        `gridX_${i}`,
+        {
+          points: [
+            new BABYLON.Vector3(i, 0.01, -gridSize / 2),
+            new BABYLON.Vector3(i, 0.01, gridSize / 2),
+          ],
+        },
+        this.scene,
+      );
       lineX.color = new BABYLON.Color3(0.5, 0.5, 0.55);
       lineX.isPickable = false;
 
-      const lineZ = BABYLON.MeshBuilder.CreateLines(`gridZ_${i}`, {
-        points: [new BABYLON.Vector3(-gridSize / 2, 0.01, i), new BABYLON.Vector3(gridSize / 2, 0.01, i)],
-      }, this.scene);
+      const lineZ = BABYLON.MeshBuilder.CreateLines(
+        `gridZ_${i}`,
+        {
+          points: [
+            new BABYLON.Vector3(-gridSize / 2, 0.01, i),
+            new BABYLON.Vector3(gridSize / 2, 0.01, i),
+          ],
+        },
+        this.scene,
+      );
       lineZ.color = new BABYLON.Color3(0.5, 0.5, 0.55);
       lineZ.isPickable = false;
     }
 
     this.scene.onPointerObservable.add((pointerInfo) => {
       if (pointerInfo.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
-      const pick = this.scene.pick(this.scene.pointerX, this.scene.pointerY, (mesh) => mesh.isPickable);
+      const pick = this.scene.pick(
+        this.scene.pointerX,
+        this.scene.pointerY,
+        (mesh) => mesh.isPickable,
+      );
       if (!pick?.hit || !pick.pickedMesh) return;
 
       const objectId = this.findObjectIdFromMesh(pick.pickedMesh);
@@ -117,7 +139,11 @@ class SceneViewer {
   }
 
   private setupCamera(): void {
-    this.camera = new BABYLON.FreeCamera('camera', new BABYLON.Vector3(0, 2, -8), this.scene);
+    this.camera = new BABYLON.FreeCamera(
+      "camera",
+      new BABYLON.Vector3(0, 2, -8),
+      this.scene,
+    );
     this.camera.attachControl(this.canvas, true);
     this.camera.speed = 0.5;
     this.camera.angularSensibility = 3000;
@@ -132,16 +158,28 @@ class SceneViewer {
   }
 
   private setupLights(): void {
-    const hemi = new BABYLON.HemisphericLight('hemiLight', new BABYLON.Vector3(0, 1, 0), this.scene);
+    const hemi = new BABYLON.HemisphericLight(
+      "hemiLight",
+      new BABYLON.Vector3(0, 1, 0),
+      this.scene,
+    );
     hemi.intensity = 1.2;
     hemi.diffuse = new BABYLON.Color3(1, 1, 1);
     hemi.groundColor = new BABYLON.Color3(0.6, 0.6, 0.7);
 
-    const dirLight1 = new BABYLON.DirectionalLight('dirLight1', new BABYLON.Vector3(1, -1.5, 1), this.scene);
+    const dirLight1 = new BABYLON.DirectionalLight(
+      "dirLight1",
+      new BABYLON.Vector3(1, -1.5, 1),
+      this.scene,
+    );
     dirLight1.position = new BABYLON.Vector3(-100, 100, -100);
     dirLight1.intensity = 0.8;
 
-    const dirLight2 = new BABYLON.DirectionalLight('dirLight2', new BABYLON.Vector3(-1, -1.5, -1), this.scene);
+    const dirLight2 = new BABYLON.DirectionalLight(
+      "dirLight2",
+      new BABYLON.Vector3(-1, -1.5, -1),
+      this.scene,
+    );
     dirLight2.position = new BABYLON.Vector3(100, 100, 100);
     dirLight2.intensity = 0.6;
   }
@@ -160,7 +198,8 @@ class SceneViewer {
     this.currentFolder = folder;
     const metadataURL = `/data/${folder}/metadata.json`;
     const response = await fetch(metadataURL);
-    if (!response.ok) throw new Error(`Failed to load metadata.json from ${folder}`);
+    if (!response.ok)
+      throw new Error(`Failed to load metadata.json from ${folder}`);
 
     const entries: MetadataEntry[] = await response.json();
     this.metadataEntries = entries;
@@ -170,7 +209,7 @@ class SceneViewer {
 
     for (const entry of entries) {
       // modelUrl is like "/models/SomeName.glb" — the actual file is in the folder
-      const fileName = entry.modelUrl.replace(/^\/models\//, '');
+      const fileName = entry.modelUrl.replace(/^\/models\//, "");
       const glbURL = `/data/${folder}/${encodeURIComponent(fileName)}`;
 
       try {
@@ -188,9 +227,16 @@ class SceneViewer {
 
   private loadGLB(id: string, url: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      BABYLON.SceneLoader.ImportMesh('', '', url, this.scene,
+      BABYLON.SceneLoader.ImportMesh(
+        "",
+        "",
+        url,
+        this.scene,
         (meshes) => {
-          if (meshes.length === 0) { reject(new Error('No meshes')); return; }
+          if (meshes.length === 0) {
+            reject(new Error("No meshes"));
+            return;
+          }
 
           const root = new BABYLON.TransformNode(`${id}_root`, this.scene);
           root.metadata = { objectId: id };
@@ -213,7 +259,9 @@ class SceneViewer {
     for (const mesh of meshes) {
       if (!this.usePresetColors) continue;
       if (mesh.material) {
-        const mat = mesh.material as BABYLON.PBRMaterial | BABYLON.StandardMaterial;
+        const mat = mesh.material as
+          | BABYLON.PBRMaterial
+          | BABYLON.StandardMaterial;
         if (mat instanceof BABYLON.StandardMaterial) {
           if (!mat.diffuseTexture && mat.diffuseColor.equalsFloats(1, 1, 1)) {
             mat.diffuseColor = this.colorFromHash(this.hashCode(id));
@@ -227,7 +275,10 @@ class SceneViewer {
           mat.roughness = 0.7;
         }
       } else if (this.usePresetColors) {
-        const defaultMat = new BABYLON.StandardMaterial(`mat_${id}`, this.scene);
+        const defaultMat = new BABYLON.StandardMaterial(
+          `mat_${id}`,
+          this.scene,
+        );
         defaultMat.diffuseColor = this.colorFromHash(this.hashCode(id));
         defaultMat.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
         mesh.material = defaultMat;
@@ -240,7 +291,8 @@ class SceneViewer {
       const prevMeshes = this.loadedMeshes.get(this.selectedId);
       if (prevMeshes) {
         for (const mesh of prevMeshes) {
-          if (mesh.material) (mesh.material as any).emissiveColor = new BABYLON.Color3(0, 0, 0);
+          if (mesh.material)
+            (mesh.material as any).emissiveColor = new BABYLON.Color3(0, 0, 0);
         }
       }
     }
@@ -251,7 +303,12 @@ class SceneViewer {
       const meshes = this.loadedMeshes.get(id);
       if (meshes) {
         for (const mesh of meshes) {
-          if (mesh.material) (mesh.material as any).emissiveColor = new BABYLON.Color3(0.2, 0.4, 0.8);
+          if (mesh.material)
+            (mesh.material as any).emissiveColor = new BABYLON.Color3(
+              0.2,
+              0.4,
+              0.8,
+            );
         }
       }
     }
@@ -286,7 +343,7 @@ class SceneViewer {
     let max = new BABYLON.Vector3(-Infinity, -Infinity, -Infinity);
 
     this.loadedMeshes.forEach((meshes) => {
-      meshes.forEach(mesh => {
+      meshes.forEach((mesh) => {
         mesh.computeWorldMatrix(true);
         const bounds = mesh.getBoundingInfo();
         min = BABYLON.Vector3.Minimize(min, bounds.boundingBox.minimumWorld);
@@ -297,29 +354,35 @@ class SceneViewer {
     const center = BABYLON.Vector3.Center(min, max);
     const diagonal = max.subtract(min).length();
 
-    this.camera.position = center.add(new BABYLON.Vector3(0, Math.max(diagonal * 0.25, 2), -Math.max(diagonal * 0.75, 8)));
+    this.camera.position = center.add(
+      new BABYLON.Vector3(
+        0,
+        Math.max(diagonal * 0.25, 2),
+        -Math.max(diagonal * 0.75, 8),
+      ),
+    );
     this.camera.setTarget(center);
   }
 
-  private showLoading(show: boolean, text = 'Loading...'): void {
-    const overlay = document.getElementById('loading-overlay')!;
-    const textEl = document.getElementById('loading-text')!;
+  private showLoading(show: boolean, text = "Loading..."): void {
+    const overlay = document.getElementById("loading-overlay")!;
+    const textEl = document.getElementById("loading-text")!;
     if (show) {
       textEl.textContent = text;
-      overlay.classList.add('active');
+      overlay.classList.add("active");
     } else {
-      overlay.classList.remove('active');
+      overlay.classList.remove("active");
     }
   }
 
   private updateLoadingProgress(progress: string): void {
-    document.getElementById('loading-progress')!.textContent = progress;
+    document.getElementById("loading-progress")!.textContent = progress;
   }
 
   private hashCode(str: string): number {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash = (hash << 5) - hash + str.charCodeAt(i);
       hash |= 0;
     }
     return Math.abs(hash);
@@ -353,22 +416,38 @@ class UIController {
   private activeId: string | null = null;
 
   constructor() {
-    this.viewer = new SceneViewer('render-canvas');
+    this.viewer = new SceneViewer("render-canvas");
 
-    this.folderSelect = document.getElementById('folder-select') as HTMLSelectElement;
-    this.btnLoadFolder = document.getElementById('btn-load-folder') as HTMLButtonElement;
-    this.objectList = document.getElementById('object-list') as HTMLElement;
-    this.listCount = document.getElementById('list-count') as HTMLElement;
-    this.objectCount = document.getElementById('object-count') as HTMLElement;
-    this.btnResetCamera = document.getElementById('btn-reset-camera') as HTMLButtonElement;
-    this.btnClearScene = document.getElementById('btn-clear-scene') as HTMLButtonElement;
-    this.togglePresets = document.getElementById('toggle-presets') as HTMLInputElement;
-    this.detailsPanel = document.getElementById('details-panel') as HTMLElement;
-    this.fieldName = document.getElementById('field-name') as HTMLInputElement;
-    this.fieldCategory = document.getElementById('field-category') as HTMLSelectElement;
-    this.fieldPlacementType = document.getElementById('field-placement-type') as HTMLSelectElement;
-    this.btnSaveMetadata = document.getElementById('btn-save-metadata') as HTMLButtonElement;
-    this.saveStatus = document.getElementById('save-status') as HTMLElement;
+    this.folderSelect = document.getElementById(
+      "folder-select",
+    ) as HTMLSelectElement;
+    this.btnLoadFolder = document.getElementById(
+      "btn-load-folder",
+    ) as HTMLButtonElement;
+    this.objectList = document.getElementById("object-list") as HTMLElement;
+    this.listCount = document.getElementById("list-count") as HTMLElement;
+    this.objectCount = document.getElementById("object-count") as HTMLElement;
+    this.btnResetCamera = document.getElementById(
+      "btn-reset-camera",
+    ) as HTMLButtonElement;
+    this.btnClearScene = document.getElementById(
+      "btn-clear-scene",
+    ) as HTMLButtonElement;
+    this.togglePresets = document.getElementById(
+      "toggle-presets",
+    ) as HTMLInputElement;
+    this.detailsPanel = document.getElementById("details-panel") as HTMLElement;
+    this.fieldName = document.getElementById("field-name") as HTMLInputElement;
+    this.fieldCategory = document.getElementById(
+      "field-category",
+    ) as HTMLSelectElement;
+    this.fieldPlacementType = document.getElementById(
+      "field-placement-type",
+    ) as HTMLSelectElement;
+    this.btnSaveMetadata = document.getElementById(
+      "btn-save-metadata",
+    ) as HTMLButtonElement;
+    this.saveStatus = document.getElementById("save-status") as HTMLElement;
 
     this.viewer.setSelectionListener((id) => this.showDetails(id));
     this.viewer.setUsePresetColors(false);
@@ -378,11 +457,12 @@ class UIController {
 
   private async loadFolderList(): Promise<void> {
     try {
-      const response = await fetch('/api/folders');
+      const response = await fetch("/api/folders");
       const folders: string[] = await response.json();
-      this.folderSelect.innerHTML = '<option value="">-- Select folder --</option>';
+      this.folderSelect.innerHTML =
+        '<option value="">-- Select folder --</option>';
       for (const folder of folders) {
-        const option = document.createElement('option');
+        const option = document.createElement("option");
         option.value = folder;
         option.textContent = folder;
         this.folderSelect.appendChild(option);
@@ -407,17 +487,22 @@ class UIController {
       this.updateObjectList();
       this.updateObjectCount();
     } catch (err) {
-      alert('Error loading folder: ' + (err as Error).message);
+      alert("Error loading folder: " + (err as Error).message);
     }
   }
 
   private setupEventListeners(): void {
-    this.btnLoadFolder.addEventListener('click', () => void this.loadSelectedFolder());
+    this.btnLoadFolder.addEventListener(
+      "click",
+      () => void this.loadSelectedFolder(),
+    );
 
-    this.btnResetCamera.addEventListener('click', () => this.viewer.resetCamera());
+    this.btnResetCamera.addEventListener("click", () =>
+      this.viewer.resetCamera(),
+    );
 
-    this.btnClearScene.addEventListener('click', () => {
-      if (confirm('Clear all objects from the scene?')) {
+    this.btnClearScene.addEventListener("click", () => {
+      if (confirm("Clear all objects from the scene?")) {
         this.viewer.clearScene();
         this.updateObjectList();
         this.updateObjectCount();
@@ -425,11 +510,14 @@ class UIController {
       }
     });
 
-    this.togglePresets.addEventListener('change', () => {
+    this.togglePresets.addEventListener("change", () => {
       this.viewer.setUsePresetColors(this.togglePresets.checked);
     });
 
-    this.btnSaveMetadata.addEventListener('click', () => void this.saveCurrentEntry());
+    this.btnSaveMetadata.addEventListener(
+      "click",
+      () => void this.saveCurrentEntry(),
+    );
   }
 
   private async saveCurrentEntry(): Promise<void> {
@@ -447,9 +535,9 @@ class UIController {
 
     // Save to server
     try {
-      const response = await fetch('/api/save-metadata', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/save-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           folder,
           data: this.viewer.getMetadataEntries(),
@@ -457,21 +545,23 @@ class UIController {
       });
 
       if (response.ok) {
-        this.saveStatus.textContent = 'Saved!';
-        this.saveStatus.style.color = '#6a6';
+        this.saveStatus.textContent = "Saved!";
+        this.saveStatus.style.color = "#6a6";
         // Update the sidebar label
         this.updateObjectList();
       } else {
         const err = await response.json();
         this.saveStatus.textContent = `Error: ${err.error}`;
-        this.saveStatus.style.color = '#a66';
+        this.saveStatus.style.color = "#a66";
       }
     } catch {
-      this.saveStatus.textContent = 'Network error';
-      this.saveStatus.style.color = '#a66';
+      this.saveStatus.textContent = "Network error";
+      this.saveStatus.style.color = "#a66";
     }
 
-    setTimeout(() => { this.saveStatus.textContent = ''; }, 2000);
+    setTimeout(() => {
+      this.saveStatus.textContent = "";
+    }, 2000);
   }
 
   private updateObjectList(): void {
@@ -483,34 +573,34 @@ class UIController {
           Select a folder with metadata.json and click "Load"
         </div>
       `;
-      this.listCount.textContent = '0';
+      this.listCount.textContent = "0";
       return;
     }
 
-    this.objectList.innerHTML = '';
+    this.objectList.innerHTML = "";
     this.listCount.textContent = entries.length.toString();
 
     for (const entry of entries) {
-      const item = document.createElement('div');
-      item.className = 'object-item';
-      if (entry.id === this.activeId) item.classList.add('selected');
+      const item = document.createElement("div");
+      item.className = "object-item";
+      if (entry.id === this.activeId) item.classList.add("selected");
 
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'name';
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "name";
       nameSpan.textContent = entry.name || entry.id;
 
-      const catSpan = document.createElement('span');
-      catSpan.className = 'coords';
+      const catSpan = document.createElement("span");
+      catSpan.className = "coords";
       catSpan.textContent = entry.category;
 
       item.appendChild(nameSpan);
       item.appendChild(catSpan);
 
-      item.addEventListener('click', () => {
-        this.objectList.querySelectorAll('.object-item').forEach(el => {
-          el.classList.remove('selected');
+      item.addEventListener("click", () => {
+        this.objectList.querySelectorAll(".object-item").forEach((el) => {
+          el.classList.remove("selected");
         });
-        item.classList.add('selected');
+        item.classList.add("selected");
         this.viewer.selectObject(entry.id);
       });
 
@@ -520,33 +610,34 @@ class UIController {
 
   private updateObjectCount(): void {
     const count = this.viewer.getMetadataEntries().length;
-    this.objectCount.textContent = count === 0
-      ? 'No objects loaded'
-      : `${count} object${count === 1 ? '' : 's'} loaded`;
+    this.objectCount.textContent =
+      count === 0
+        ? "No objects loaded"
+        : `${count} object${count === 1 ? "" : "s"} loaded`;
   }
 
   private showDetails(id: string | null): void {
     this.activeId = id;
     if (!id) {
-      this.detailsPanel.classList.add('hidden');
+      this.detailsPanel.classList.add("hidden");
       return;
     }
 
     const entry = this.viewer.getEntry(id);
     if (!entry) {
-      this.detailsPanel.classList.add('hidden');
+      this.detailsPanel.classList.add("hidden");
       return;
     }
 
-    this.detailsPanel.classList.remove('hidden');
+    this.detailsPanel.classList.remove("hidden");
     this.fieldName.value = entry.name;
     this.fieldCategory.value = entry.category;
     this.fieldPlacementType.value = entry.placementType;
-    this.saveStatus.textContent = '';
+    this.saveStatus.textContent = "";
   }
 }
 
 // ── Initialize ──
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener("DOMContentLoaded", () => {
   new UIController();
 });

@@ -66,6 +66,27 @@ This will:
 - Generate `manifest.json` with object locations
 - Save individual GLB files to the output directory
 
+### 3a. Compress a Folder with Draco
+
+Use the CLI tool to recursively compress every `.glb` or `.gltf` file inside a folder.
+The default settings are intentionally aggressive for smaller files, and you can tune them with flags:
+
+```bash
+bun run compress:draco -- models/furniture
+```
+
+**Example:**
+```bash
+bun run compress:draco -- forest/master --position-bits 12 --normal-bits 8 --uv-bits 10 --encode-speed 0 --decode-speed 0
+```
+
+This will:
+- Walk the folder recursively
+- Compress each model with Draco
+- Write compressed `.glb` files to a mirrored `*-draco` output folder by default
+- Use aggressive quantization defaults for smaller output
+- Allow `--method sequential`, `--volume scene|bbox`, and bit-depth flags when needed
+
 ### 3b. Blender Export Alternative
 
 If you prefer Blender's exporter, use `blender_export.py` with a `.glb` input:
