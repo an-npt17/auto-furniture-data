@@ -19,6 +19,14 @@ Version Updates
                     Exports groups as single .glb, ungrouped objects as individual .glb
                     Generates metadata.json with position and size per exported file
 
+2025/04/22  v05     Added quaternion rotation to metadata.json
+                    Rotation converted from 3ds Max (Z-up, left-hand rule)
+                    to Three.js (Y-up, right-hand rule).
+                    Step 1 - flip handedness: negate x,y,z (keep w) to go LH->RH
+                    Step 2 - remap axes Z-up->Y-up: (x,y,z) -> (x,z,-y)
+                    Combined result: Max(x,y,z,w) -> Three.js(-x,-z,y,-w)
+                    then normalize to ensure unit length
+
 */
 
 
@@ -51,7 +59,7 @@ Icon:"MassFX\CreateHingeConstraint"
 
 
 
-    scriptVersion = "4.0"
+    scriptVersion = "5.0"
 
     renderEngine = ""
 
@@ -239,7 +247,114 @@ Icon:"MassFX\CreateHingeConstraint"
 
 
 
-    fn BuildExportMetadataRecord objectNode exportedName sizeArray positionValue nodeArray =
+    ----------------------------------
+
+    -- Rotation: 3ds Max -> Three.js
+
+    ----------------------------------
+
+    -- 3ds Max quaternion properties (from SDK docs):
+    --   * Left-hand rule for positive rotation direction
+    --   * Z-up coordinate system (X=right, Y=forward, Z=up)
+    --
+    -- Three.js quaternion properties:
+    --   * Right-hand rule for positive rotation direction
+    --   * Y-up coordinate system (X=right, Y=up, Z=toward viewer)
+    --
+    -- Conversion is done in two steps:
+    --
+    --   Step 1 - Flip handedness LH -> RH:
+    --     Negate the vector part (x,y,z), keep w.
+    --     q_rh = (-x, -y, -z, w)
+    --
+    --   Step 2 - Remap axes Z-up -> Y-up:
+    --     In Z-up:  X=right, Y=forward, Z=up
+    --     In Y-up:  X=right, Y=up,      Z=toward viewer (was -Y in Z-up)
+    --     So the old Z axis becomes the new Y axis,
+    --     and the old Y axis becomes the new -Z axis.
+    --     Apply that axis swap to the RH quaternion components:
+    --     q_yup = (qx, qz, -qy, w)  where qx/qy/qz are from Step 1
+    --
+    --   Combined (substituting Step 1 into Step 2):
+    --     Three.js(x, y, z, w) = Max(-x, -z, y, w)
+    --
+    --   Finally normalize to guard against any floating point drift.
+
+    fn GetObjectRotationYUp objArray =
+
+    (
+
+        if classof objArray != Array then objArray = #(objArray)
+
+        local q = quat 0 0 0 1
+
+        -- Prefer group head rotation
+
+        for obj in objArray where isGroupHead obj do
+
+        (
+
+            q = obj.rotation
+
+            exit
+
+        )
+
+        -- Fallback: first geometry node
+
+        if q == (quat 0 0 0 1) do
+
+        (
+
+            for obj in objArray where isValidNode obj and (superClassOf obj == GeometryClass) do
+
+            (
+
+                q = obj.rotation
+
+                exit
+
+            )
+
+        )
+
+        -- Step 1: flip handedness LH->RH  =>  (-x, -y, -z, w)
+        -- Step 2: remap Z-up->Y-up        =>  (qx, qz, -qy, w)
+        -- Combined                        =>  (-x, -z, y, w)
+
+        local rx = -q.x
+
+        local ry = -q.z
+
+        local rz =  q.y
+
+        local rw =  q.w
+
+        -- Normalize to guard against floating point drift
+
+        local len = sqrt (rx*rx + ry*ry + rz*rz + rw*rw)
+
+        if len > 0.0 do
+
+        (
+
+            rx = rx / len
+
+            ry = ry / len
+
+            rz = rz / len
+
+            rw = rw / len
+
+        )
+
+        return (quat rx ry rz rw)
+
+    )
+
+
+
+    fn BuildExportMetadataRecord objectNode exportedName sizeArray positionValue rotationValue nodeArray =
 
     (
 
@@ -251,7 +366,7 @@ Icon:"MassFX\CreateHingeConstraint"
 
         local modelUrl = "/models/" + exportedName
 
-        return #(objectId, objectName, "phong ngu", "model", sizeArray[1], sizeArray[2], sizeArray[3], "floor", objectColor, modelUrl, positionValue.x, positionValue.y, positionValue.z)
+        return #(objectId, objectName, "phong ngu", "model", sizeArray[1], sizeArray[2], sizeArray[3], "floor", objectColor, modelUrl, positionValue.x, positionValue.y, positionValue.z, rotationValue.x, rotationValue.y, rotationValue.z, rotationValue.w)
 
     )
 
@@ -2561,7 +2676,7 @@ Icon:"MassFX\CreateHingeConstraint"
 
     ----------------------------------
 
-    -- Export to Groups (Scene) - NEW
+    -- Export to Groups (Scene)
 
     ----------------------------------
 
@@ -2671,6 +2786,55 @@ Icon:"MassFX\CreateHingeConstraint"
 
 
 
+    -- Get quaternion rotation converted from 3ds Max (Z-up, left-hand rule)
+    -- to Three.js (Y-up, right-hand rule). See GetObjectRotationYUp for full derivation.
+
+    fn GetObjectRotationYUp objArray =
+
+    (
+
+        if classof objArray != Array then objArray = #(objArray)
+
+        local q = quat 0 0 0 1
+
+        -- Prefer group head rotation
+
+        for obj in objArray where isGroupHead obj do
+
+        (
+
+            q = obj.rotation
+
+            exit
+
+        )
+
+        -- Fallback: first geometry node
+
+        if q == (quat 0 0 0 1) do
+
+        (
+
+            for obj in objArray where isValidNode obj and (superClassOf obj == GeometryClass) do
+
+            (
+
+                q = obj.rotation
+
+                exit
+
+            )
+
+        )
+
+        -- Remap axes: Max(x, y, z, w) -> Three.js(x, z, -y, w)
+
+        return (quat q.x q.z (-q.y) q.w)
+
+    )
+
+
+
     -- Recursively collect all members of a group
 
     fn CollectGroupMembers groupHead =
@@ -2759,6 +2923,43 @@ Icon:"MassFX\CreateHingeConstraint"
 
 
 
+    fn BuildExportMetadataRecord objectNode exportedName sizeArray positionValue rotationValue nodeArray =
+
+    (
+
+        local objectName = objectNode.name
+
+        local objectId = substituteString (SanitizeFilename objectName) " " "-"
+
+        local objectColor = GetMaterialColor nodeArray
+
+        local modelUrl = "/models/" + exportedName
+
+        -- entry indices:
+        -- [1]  id
+        -- [2]  name
+        -- [3]  category
+        -- [4]  shape
+        -- [5]  size.x
+        -- [6]  size.y
+        -- [7]  size.z
+        -- [8]  placementType
+        -- [9]  color
+        -- [10] modelUrl
+        -- [11] position.x
+        -- [12] position.y
+        -- [13] position.z
+        -- [14] rotation.x  (Three.js Y-up)
+        -- [15] rotation.y  (Three.js Y-up)
+        -- [16] rotation.z  (Three.js Y-up)
+        -- [17] rotation.w  (Three.js Y-up)
+
+        return #(objectId, objectName, "phong ngu", "model", sizeArray[1], sizeArray[2], sizeArray[3], "floor", objectColor, modelUrl, positionValue.x, positionValue.y, positionValue.z, rotationValue.x, rotationValue.y, rotationValue.z, rotationValue.w)
+
+    )
+
+
+
     -- Main export groups function
 
     fn ExportGroupsScene glbPath =
@@ -2795,7 +2996,9 @@ Icon:"MassFX\CreateHingeConstraint"
 
             local sz = GetBoundingBoxSize groupMembers
 
-            append metadata (BuildExportMetadataRecord obj exportedName sz pos)
+            local rot = GetObjectRotationYUp groupMembers
+
+            append metadata (BuildExportMetadataRecord obj exportedName sz pos rot groupMembers)
 
         )
 
@@ -2819,7 +3022,9 @@ Icon:"MassFX\CreateHingeConstraint"
 
                 local sz = GetBoundingBoxSize #(obj)
 
-                append metadata (BuildExportMetadataRecord obj exportedName sz pos)
+                local rot = GetObjectRotationYUp #(obj)
+
+                append metadata (BuildExportMetadataRecord obj exportedName sz pos rot #(obj))
 
             )
 
@@ -2839,53 +3044,63 @@ Icon:"MassFX\CreateHingeConstraint"
 
         (
 
-            local entry = metadata[i]
+            local entry          = metadata[i]
 
-            local id = EscapeJsonString entry[1]
+            local id             = EscapeJsonString entry[1]
 
-            local name = EscapeJsonString entry[2]
+            local name           = EscapeJsonString entry[2]
 
-            local category = EscapeJsonString entry[3]
+            local category       = EscapeJsonString entry[3]
 
-            local shape = EscapeJsonString entry[4]
+            local shape          = EscapeJsonString entry[4]
 
-            local sx = formattedPrint entry[5] format:".4f"
+            local sx             = formattedPrint entry[5]  format:".4f"
 
-            local sy = formattedPrint entry[6] format:".4f"
+            local sy             = formattedPrint entry[6]  format:".4f"
 
-            local sz = formattedPrint entry[7] format:".4f"
+            local sz             = formattedPrint entry[7]  format:".4f"
 
-            local placementType = EscapeJsonString entry[8]
+            local placementType  = EscapeJsonString entry[8]
 
-            local color = EscapeJsonString entry[9]
+            local color          = EscapeJsonString entry[9]
 
-            local modelUrl = EscapeJsonString entry[10]
+            local modelUrl       = EscapeJsonString entry[10]
 
-            local px = formattedPrint entry[11] format:".4f"
+            local px             = formattedPrint entry[11] format:".4f"
 
-            local py = formattedPrint entry[12] format:".4f"
+            local py             = formattedPrint entry[12] format:".4f"
 
-            local pz = formattedPrint entry[13] format:".4f"
+            local pz             = formattedPrint entry[13] format:".4f"
 
-            format "  {\n" to:fStream
+            local rx             = formattedPrint entry[14] format:".6f"
 
-            format "    \"id\": \"%\",\n" id to:fStream
+            local ry             = formattedPrint entry[15] format:".6f"
 
-            format "    \"name\": \"%\",\n" name to:fStream
+            local rz             = formattedPrint entry[16] format:".6f"
 
-            format "    \"category\": \"%\",\n" category to:fStream
+            local rw             = formattedPrint entry[17] format:".6f"
 
-            format "    \"shape\": \"%\",\n" shape to:fStream
+            format "  {\n"                                                                      to:fStream
 
-            format "    \"size\": [%, %, %],\n" sx sy sz to:fStream
+            format "    \"id\": \"%\",\n"              id                                       to:fStream
 
-            format "    \"placementType\": \"%\",\n" placementType to:fStream
+            format "    \"name\": \"%\",\n"            name                                     to:fStream
 
-            format "    \"color\": \"%\",\n" color to:fStream
+            format "    \"category\": \"%\",\n"        category                                 to:fStream
 
-            format "    \"modelUrl\": \"%\",\n" modelUrl to:fStream
+            format "    \"shape\": \"%\",\n"           shape                                    to:fStream
 
-            format "    \"position\": { \"x\": %, \"y\": %, \"z\": % }\n" px py pz to:fStream
+            format "    \"size\": [%, %, %],\n"        sx sy sz                                 to:fStream
+
+            format "    \"placementType\": \"%\",\n"   placementType                            to:fStream
+
+            format "    \"color\": \"%\",\n"           color                                    to:fStream
+
+            format "    \"modelUrl\": \"%\",\n"        modelUrl                                 to:fStream
+
+            format "    \"position\": { \"x\": %, \"y\": %, \"z\": % },\n"    px py pz         to:fStream
+
+            format "    \"rotation\": { \"x\": %, \"y\": %, \"z\": %, \"w\": % }\n" rx ry rz rw to:fStream
 
             if i < metadata.count then
 
@@ -2991,7 +3206,7 @@ Icon:"MassFX\CreateHingeConstraint"
 
             checkbox chk_xpAll "Export All (Scene)" checked:false tooltip:"Export all mesh objects in the scene as one object and set the file name yourself (WITHOUT the .glb extension)"
 
-            checkbox chk_xpGroups "Export to Groups (Scene)" checked:false tooltip:"Export groups as single .glb files, ungrouped objects as individual .glb files. Generates metadata.json with position and size for each exported file."
+            checkbox chk_xpGroups "Export to Groups (Scene)" checked:false tooltip:"Export groups as single .glb files, ungrouped objects as individual .glb files. Generates metadata.json with position, rotation (Three.js Y-up quaternion) and size for each exported file."
 
             edittext et_exportName "" tooltip:"Enter the GLB filename for all objects being exported (Do not add .glb in the filename)"
 
