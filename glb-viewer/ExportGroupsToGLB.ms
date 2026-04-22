@@ -2797,37 +2797,49 @@ Icon:"MassFX\CreateHingeConstraint"
 
         local q = quat 0 0 0 1
 
+        local found = false
+
         -- Prefer group head rotation
 
-        for obj in objArray where isGroupHead obj do
+        for obj in objArray while not found do
 
         (
 
-            q = obj.rotation
-
-            exit
-
-        )
-
-        -- Fallback: first geometry node
-
-        if q == (quat 0 0 0 1) do
-
-        (
-
-            for obj in objArray where isValidNode obj and (superClassOf obj == GeometryClass) do
+            if isGroupHead obj then
 
             (
 
                 q = obj.rotation
 
-                exit
+                found = true
 
             )
 
         )
 
-        -- Remap axes: Max(x, y, z, w) -> Three.js(x, z, -y, w)
+        -- Fallback: first geometry node
+
+        if not found do
+
+        (
+
+            for obj in objArray while not found do
+
+            (
+
+                if isValidNode obj and (superClassOf obj == GeometryClass) then
+
+                (
+
+                    q = obj.rotation
+
+                    found = true
+
+                )
+
+            )
+
+        )
 
         return (quat q.x q.z (-q.y) q.w)
 
