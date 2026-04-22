@@ -2694,27 +2694,33 @@ Icon:"MassFX\CreateHingeConstraint"
 
         local maxPt = [-1e9, -1e9, -1e9]
 
-        for obj in objArray where isValidNode obj and (superClassOf obj == GeometryClass) do
+        for obj in objArray do
 
         (
 
-            local bb = nodeGetBoundingBox obj (matrix3 1)
+            if isValidNode obj and (superClassOf obj == GeometryClass) then
 
-            local objMin = bb[1]
+            (
 
-            local objMax = bb[2]
+                local bb = nodeGetBoundingBox obj (matrix3 1)
 
-            if objMin.x < minPt.x do minPt.x = objMin.x
+                local objMin = bb[1]
 
-            if objMin.y < minPt.y do minPt.y = objMin.y
+                local objMax = bb[2]
 
-            if objMin.z < minPt.z do minPt.z = objMin.z
+                if objMin.x < minPt.x do minPt.x = objMin.x
 
-            if objMax.x > maxPt.x do maxPt.x = objMax.x
+                if objMin.y < minPt.y do minPt.y = objMin.y
 
-            if objMax.y > maxPt.y do maxPt.y = objMax.y
+                if objMin.z < minPt.z do minPt.z = objMin.z
 
-            if objMax.z > maxPt.z do maxPt.z = objMax.z
+                if objMax.x > maxPt.x do maxPt.x = objMax.x
+
+                if objMax.y > maxPt.y do maxPt.y = objMax.y
+
+                if objMax.z > maxPt.z do maxPt.z = objMax.z
+
+            )
 
         )
 
@@ -2746,19 +2752,41 @@ Icon:"MassFX\CreateHingeConstraint"
 
         )
 
-        else
+        -- Find group head position first
+
+        local found = false
+
+        local result = [0,0,0]
+
+        for obj in objArray while not found do
 
         (
 
-            for obj in objArray where isGroupHead obj do return obj.pos
+            if isGroupHead obj then
 
-            -- Fallback: center of bounding box
+            (
 
-            local minPt = [1e9, 1e9, 1e9]
+                result = obj.pos
 
-            local maxPt = [-1e9, -1e9, -1e9]
+                found = true
 
-            for obj in objArray where isValidNode obj and (superClassOf obj == GeometryClass) do
+            )
+
+        )
+
+        if found then return result
+
+        -- Fallback: center of bounding box
+
+        local minPt = [1e9, 1e9, 1e9]
+
+        local maxPt = [-1e9, -1e9, -1e9]
+
+        for obj in objArray do
+
+        (
+
+            if isValidNode obj and (superClassOf obj == GeometryClass) then
 
             (
 
@@ -2778,9 +2806,9 @@ Icon:"MassFX\CreateHingeConstraint"
 
             )
 
-            return (minPt + maxPt) / 2.0
-
         )
+
+        return (minPt + maxPt) / 2.0
 
     )
 
