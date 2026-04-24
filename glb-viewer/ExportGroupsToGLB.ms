@@ -433,20 +433,20 @@ Icon:"MassFX\CreateHingeConstraint"
 
   fn ConvertBitmapToJpg currentBitmap =
   (
-    local fn       = currentBitmap.filename
-    local ext      = getFilenameType fn
+    local filename       = currentBitmap.filename
+    local ext      = getFilenameType filename
     local okTypes  = #(".jpg",".jpeg",".png")
     if findItem okTypes ext == 0 do
     (
-      try(local orig = openBitmap fn)catch()
+      try(local orig = openBitmap filename)catch()
       if (orig != undefined and isKindOf orig bitmap) then
       (
-        local newFn = getFilenamePath fn + getFilenameFile fn + ".jpg"
+        local newFn = getFilenamePath filename + getFilenameFile filename + ".jpg"
         if doesFileExist newFn then
           currentBitmap.filename = newFn
         else
         (
-          print ("Converting Non-Compliant GLB Texture: " + (filenameFromPath fn))
+          print ("Converting Non-Compliant GLB Texture: " + (filenameFromPath filename))
           local nb = bitmap orig.width orig.height
           pasteBitmap orig nb [0,0] [0,0]
           nb.filename = newFn
