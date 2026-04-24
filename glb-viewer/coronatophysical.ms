@@ -90,18 +90,18 @@ macroScript CoronaToPhysical
 							-- If found bitmap within the Normal Map node 
 							for j in (getClassInstances Bitmaptexture target:i.normalMap) do
 							(
-								if j.filename == undefined then continue
 								-- filenameFromPath copies only "myImage.jpg" instead of full path so (works for stripped paths)
-								n = openBitmap (filenameFromPath j.filename) gamma:1.0
-								
-								-- copy Bitmap filename
-								n.filename = j.filename
-								
-								-- Assign Bitmap gamma 1.0
-								n.gamma = 1.0
-								
-								-- Replace the Normal Map Bitmap with the updated gamma 1.0 (reload Bitmap)
-								j.bitmap = n 
+								if (j.filename != undefined and j.filename != "") then
+								(
+									if doesFileExist j.filename then
+									(
+										n = openBitmap j.filename gamma:1.0
+										n.filename = j.filename
+										n.gamma = 1.0
+										j.bitmap = n
+									)
+								)
+
 							)
 						)
 						
