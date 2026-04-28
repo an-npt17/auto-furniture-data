@@ -1,16 +1,13 @@
 // cli/compress-draco.ts
 // Usage: bun cli/compress-draco.ts <input-folder> [output-folder] [options]
 import path from 'node:path';
-import { readdir, mkdir, stat, writeFile } from 'node:fs/promises';
+import { readdir, mkdir, stat } from 'node:fs/promises';
 
-type CompressionOptions = {
-  method: 'edgebreaker' | 'sequential';
-  encodeSpeed: number;
-  decodeSpeed: number;
-  quantizePosition: number;
-  quantizeNormal: number;
-  quantizeTexcoord: number;
-  quantizationVolume: 'mesh' | 'scene';
+type TextureOptions = {
+  uastcLevel: number;
+  rdo: boolean;
+  rdoLambda: number;
+  zstd: number;
 };
 
 function parseIntegerFlag(value: string | undefined, fallback: number, name: string): number {
@@ -77,15 +74,10 @@ function printUsage(): void {
     'Usage: bun cli/compress-draco.ts <input-folder> [output-folder] [options]',
     '',
     'Options:',
-    '  --method edgebreaker|sequential  Draco method (default: edgebreaker)',
-    '  --encode-speed <n>               Lower is smaller, slower (default: 0)',
-    '  --decode-speed <n>               Lower is smaller, slower (default: 0)',
-    '  --position-bits <n>              Position quantization bits (default: 12)',
-    '  --normal-bits <n>                Normal quantization bits (default: 8)',
-    '  --uv-bits <n>                    UV quantization bits (default: 10)',
-    '  --joint-bits <n>                 Joint quantization bits (default: 8)',
-    '  --weight-bits <n>                Weight quantization bits (default: 8)',
-    '  --volume mesh|scene|bbox         Quantization volume (default: mesh)',
+    '  --uastc-level <n>                UASTC level, 0-4 (default: 2)',
+    '  --rdo                            Enable UASTC RDO (default: false)',
+    '  --rdo-lambda <n>                 UASTC RDO lambda, 0.001-10 (default: 1)',
+    '  --zstd <n>                       Zstd level, 0-22 (default: 18)',
     '  -h, --help                       Show this help message',
   ].join('\n'));
 }
@@ -106,24 +98,15 @@ const outputDirRelative = path.relative(inputDir, outputDir);
 const outputDirInsideInput = outputDirRelative !== '' && !outputDirRelative.startsWith('..') && !path.isAbsolute(outputDirRelative);
 
 const MODEL_EXTENSIONS = new Set(['.glb', '.gltf']);
-const compressionOptions: CompressionOptions = {
-  method: parseChoiceFlag(
-    typeof flags.get('--method') === 'string' ? flags.get('--method') : undefined,
-    'edgebreaker',
-    '--method',
-    ['edgebreaker', 'sequential'],
-  ),
-  encodeSpeed: parseIntegerFlag(typeof flags.get('--encode-speed') === 'string' ? flags.get('--encode-speed') : undefined, 0, '--encode-speed'),
-  decodeSpeed: parseIntegerFlag(typeof flags.get('--decode-speed') === 'string' ? flags.get('--decode-speed') : undefined, 0, '--decode-speed'),
-  quantizePosition: parseIntegerFlag(typeof flags.get('--position-bits') === 'string' ? flags.get('--position-bits') : undefined, 12, '--position-bits'),
-  quantizeNormal: parseIntegerFlag(typeof flags.get('--normal-bits') === 'string' ? flags.get('--normal-bits') : undefined, 8, '--normal-bits'),
-  quantizeTexcoord: parseIntegerFlag(typeof flags.get('--uv-bits') === 'string' ? flags.get('--uv-bits') : undefined, 10, '--uv-bits'),
-  quantizationVolume: parseChoiceFlag(
-    typeof flags.get('--volume') === 'string' ? flags.get('--volume') : undefined,
-    'mesh',
-    '--volume',
-    ['mesh', 'scene'],
-  ),
+const textureOptions: TextureOptions = {
+  uastcLevel: parseIntegerFlag(typeof flags.get('--uastc-level') === 'string' ? flags.get('--uastc-level') : undefined, 2, '--uastc-level'),
+  rdo: flags.get('--rdo') === true,
+  rdoLambda: typeof flags.get('--rdo-lambda') === 'string'
+    ? Number(flags.get('--rdo-lambda'))
+    : 1,
+  zstd: typeof flags.get('--zstd') === 'string'
+    ? parseIntegerFlag(flags.get('--zstd') as string, 18, '--zstd')
+    : 18,
 };
 
 async function listModels(dir: string): Promise<string[]> {
@@ -155,10 +138,13 @@ async function listModels(dir: string): Promise<string[]> {
 async function compressFile(inputPath: string, outputPath: string): Promise<void> {
   await mkdir(path.dirname(outputPath), { recursive: true });
 
-  const command = Bun.$`bunx @gltf-transform/cli draco ${inputPath} ${outputPath} --method ${compressionOptions.method} --encode-speed ${compressionOptions.encodeSpeed} --decode-speed ${compressionOptions.decodeSpeed} --quantize-position ${compressionOptions.quantizePosition} --quantize-normal ${compressionOptions.quantizeNormal} --quantize-texcoord ${compressionOptions.quantizeTexcoord} --quantization-volume ${compressionOptions.quantizationVolume}`;
+  const rdoArgs = textureOptions.rdo
+    ? ['--rdo', '--rdo-lambda', String(textureOptions.rdoLambda)]
+    : [];
+  const command = Bun.$`bunx @gltf-transform/cli uastc ${inputPath} ${outputPath} --level ${textureOptions.uastcLevel} --zstd ${textureOptions.zstd} ${rdoArgs}`;
   const result = await command;
   if (result.exitCode !== 0) {
-    throw new Error(`gltf-transform draco failed for ${inputPath}`);
+    throw new Error(`gltf-transform uastc failed for ${inputPath}`);
   }
 }
 

@@ -257,7 +257,7 @@ Icon:"MassFX\CreateHingeConstraint"
     local sizeY = sizeArray[3]      -- Max Z  -> Three.js Y  (height)
     local sizeZ = sizeArray[2]      -- Max Y  -> Three.js Z  (depth)
 
-    #(objId, objName, "phong ngu", "model",
+    #(objId, objName, "other", "model",
       sizeX, sizeY, sizeZ,
       "floor", objColor, modelUrl,
       posX, posY, posZ,
