@@ -2,44 +2,41 @@ import { serve } from "bun";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+async function listDataFolders(): Promise<string[]> {
+  const entries = await readdir(".", { withFileTypes: true });
+  const folders: string[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const metaFile = Bun.file(join(entry.name, "metadata.json"));
+    if (await metaFile.exists()) {
+      folders.push(entry.name);
+    }
+  }
+
+  return folders;
+}
+
 const server = serve({
   port: 3000,
   async fetch(req) {
     const url = new URL(req.url);
 
-    // Serve the main HTML page
-    if (url.pathname === "/" || url.pathname === "/index.html") {
-      return new Response(await Bun.file("public/index.html").text(), {
-        headers: { "Content-Type": "text/html" },
-      });
-    }
-
     // Serve the scene viewer HTML page
-    if (url.pathname === "/scene-viewer" || url.pathname === "/scene-viewer.html") {
+    if (
+      url.pathname === "/" ||
+      url.pathname === "/scene-viewer" ||
+      url.pathname === "/scene-viewer.html"
+    ) {
       return new Response(await Bun.file("public/scene-viewer.html").text(), {
-        headers: { "Content-Type": "text/html" },
-      });
-    }
-
-    // Serve the test scene HTML page
-    if (url.pathname === "/test-scene" || url.pathname === "/test-scene.html") {
-      return new Response(await Bun.file("public/test-scene.html").text(), {
         headers: { "Content-Type": "text/html" },
       });
     }
 
     // API: list available data folders (those containing metadata.json)
     if (url.pathname === "/api/folders") {
-      const entries = await readdir(".", { withFileTypes: true });
-      const folders: string[] = [];
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const metaFile = Bun.file(join(entry.name, "metadata.json"));
-          if (await metaFile.exists()) {
-            folders.push(entry.name);
-          }
-        }
-      }
+      const folders = await listDataFolders();
       return new Response(JSON.stringify(folders), {
         headers: { "Content-Type": "application/json" },
       });
@@ -53,30 +50,30 @@ const server = serve({
       if (!folder || !data) {
         return new Response(JSON.stringify({ error: "Missing folder or data" }), { status: 400 });
       }
+      const normalizedData = Array.isArray(data)
+        ? data
+        : typeof data === "object" && data !== null && Array.isArray((data as { objects?: unknown }).objects)
+        ? data
+        : null;
+
+      if (!normalizedData) {
+        return new Response(JSON.stringify({ error: "Invalid metadata payload" }), { status: 400 });
+      }
+
+      const allowedFolders = new Set(await listDataFolders());
+      if (!allowedFolders.has(folder)) {
+        return new Response(JSON.stringify({ error: "Unknown folder" }), { status: 400 });
+      }
+
       const metaPath = join(folder, "metadata.json");
       const metaFile = Bun.file(metaPath);
       if (!(await metaFile.exists())) {
         return new Response(JSON.stringify({ error: "metadata.json not found in folder" }), { status: 404 });
       }
-      await Bun.write(metaPath, JSON.stringify(data, null, 2));
+      await Bun.write(metaPath, JSON.stringify(normalizedData, null, 2));
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
       });
-    }
-
-    // Serve the viewer script
-    if (url.pathname === "/viewer.js") {
-      const transpiled = await Bun.build({
-        entrypoints: ["src/main.ts"],
-        outdir: "./build",
-        target: "browser",
-      });
-
-      if (transpiled.outputs.length > 0) {
-        return new Response(transpiled.outputs[0], {
-          headers: { "Content-Type": "application/javascript" },
-        });
-      }
     }
 
     // Serve the scene viewer script
@@ -148,6 +145,4 @@ const server = serve({
 });
 
 console.log(`GLB Viewer running at http://localhost:${server.port}`);
-console.log(`Single model viewer: http://localhost:${server.port}/`);
-console.log(`Scene viewer: http://localhost:${server.port}/scene-viewer`);
-console.log(`Test scene: http://localhost:${server.port}/test-scene`);
+console.log(`Scene viewer: http://localhost:${server.port}/`);

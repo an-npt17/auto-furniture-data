@@ -228,7 +228,7 @@ Icon:"MassFX\CreateHingeConstraint"
   --
   -- Record layout:
   --  [1]  id           [2]  name         [3]  category
-  --  [4]  shape        [5]  size.x       [6]  size.y
+  --  [4]  type         [5]  size.x       [6]  size.y
   --  [7]  size.z       [8]  placementType[9]  color
   --  [10] modelUrl     [11] position.x   [12] position.y
   --  [13] position.z   [14] rotation.x   [15] rotation.y
@@ -1261,7 +1261,7 @@ Icon:"MassFX\CreateHingeConstraint"
       format "      \"id\": \"%\",\n"                              id                        to:fStream
       format "      \"name\": \"%\",\n"                            nm                        to:fStream
       format "      \"category\": \"%\",\n"                        cat                       to:fStream
-      format "      \"shape\": \"%\",\n"                           shp                       to:fStream
+      format "      \"type\": \"%\",\n"                           shp                       to:fStream
       format "      \"size\": [%, %, %],\n"                        ssx ssy ssz               to:fStream
       format "      \"placementType\": \"%\",\n"                   plt                       to:fStream
       format "      \"color\": \"%\",\n"                           col                       to:fStream
@@ -1383,11 +1383,9 @@ Icon:"MassFX\CreateHingeConstraint"
 
     group "Contact"
     (
-      label lbl_name "James Vella" align:#left
-      hyperlink hyp_site "www.jamesvella.net" align:#left color:(color 92 216 157) hovercolor:(color 0 150 150) visitedcolor:(color 0 200 200) address:"https://www.jamesvella.net"
+      label lbl_name "A-Star Group" align:#left
+      hyperlink hyp_site "https://a-star.group/" align:#left color:(color 92 216 157) hovercolor:(color 0 150 150) visitedcolor:(color 0 200 200) address:"https://a-star.group/"
       label lbl_spacer1
-      label lbl_info1 "If you like the script you can buy me a coffee :)" align:#left
-      hyperlink hyp_donate "Donate" align:#left color:(color 92 216 157) hovercolor:(color 0 150 150) visitedcolor:(color 0 200 200) address:"https://www.paypal.com/donate/?hosted_button_id=GL9MAY2KZVJBC"
     )
 
     -- ---- Open ----

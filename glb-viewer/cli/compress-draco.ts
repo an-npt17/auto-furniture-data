@@ -2,23 +2,15 @@
 // Usage: bun cli/compress-draco.ts <input-folder> [output-folder] [options]
 import path from 'node:path';
 import { readdir, mkdir, stat, writeFile } from 'node:fs/promises';
-import { NodeIO } from '@gltf-transform/core';
-import { KHRDracoMeshCompression, KHRMaterialsTransmission, KHRTextureTransform } from '@gltf-transform/extensions';
-import draco3d from 'draco3dgltf';
 
 type CompressionOptions = {
-  method: typeof KHRDracoMeshCompression.EncoderMethod[keyof typeof KHRDracoMeshCompression.EncoderMethod];
+  method: 'edgebreaker' | 'sequential';
   encodeSpeed: number;
   decodeSpeed: number;
-  quantizationBits: {
-    POSITION: number;
-    NORMAL: number;
-    TEX_COORD: number;
-    GENERIC?: number;
-    JOINT?: number;
-    WEIGHT?: number;
-  };
-  quantizationVolume: 'mesh' | 'scene' | 'bbox';
+  quantizePosition: number;
+  quantizeNormal: number;
+  quantizeTexcoord: number;
+  quantizationVolume: 'mesh' | 'scene';
 };
 
 function parseIntegerFlag(value: string | undefined, fallback: number, name: string): number {
@@ -114,29 +106,23 @@ const outputDirRelative = path.relative(inputDir, outputDir);
 const outputDirInsideInput = outputDirRelative !== '' && !outputDirRelative.startsWith('..') && !path.isAbsolute(outputDirRelative);
 
 const MODEL_EXTENSIONS = new Set(['.glb', '.gltf']);
-const compressionOptions: Parameters<InstanceType<typeof KHRDracoMeshCompression>['setEncoderOptions']>[0] = {
+const compressionOptions: CompressionOptions = {
   method: parseChoiceFlag(
     typeof flags.get('--method') === 'string' ? flags.get('--method') : undefined,
     'edgebreaker',
     '--method',
     ['edgebreaker', 'sequential'],
-  ) === 'sequential'
-    ? KHRDracoMeshCompression.EncoderMethod.SEQUENTIAL
-    : KHRDracoMeshCompression.EncoderMethod.EDGEBREAKER,
+  ),
   encodeSpeed: parseIntegerFlag(typeof flags.get('--encode-speed') === 'string' ? flags.get('--encode-speed') : undefined, 0, '--encode-speed'),
   decodeSpeed: parseIntegerFlag(typeof flags.get('--decode-speed') === 'string' ? flags.get('--decode-speed') : undefined, 0, '--decode-speed'),
-  quantizationBits: {
-    POSITION: parseIntegerFlag(typeof flags.get('--position-bits') === 'string' ? flags.get('--position-bits') : undefined, 12, '--position-bits'),
-    NORMAL: parseIntegerFlag(typeof flags.get('--normal-bits') === 'string' ? flags.get('--normal-bits') : undefined, 8, '--normal-bits'),
-    TEX_COORD: parseIntegerFlag(typeof flags.get('--uv-bits') === 'string' ? flags.get('--uv-bits') : undefined, 10, '--uv-bits'),
-    JOINT: parseIntegerFlag(typeof flags.get('--joint-bits') === 'string' ? flags.get('--joint-bits') : undefined, 8, '--joint-bits'),
-    WEIGHT: parseIntegerFlag(typeof flags.get('--weight-bits') === 'string' ? flags.get('--weight-bits') : undefined, 8, '--weight-bits'),
-  },
+  quantizePosition: parseIntegerFlag(typeof flags.get('--position-bits') === 'string' ? flags.get('--position-bits') : undefined, 12, '--position-bits'),
+  quantizeNormal: parseIntegerFlag(typeof flags.get('--normal-bits') === 'string' ? flags.get('--normal-bits') : undefined, 8, '--normal-bits'),
+  quantizeTexcoord: parseIntegerFlag(typeof flags.get('--uv-bits') === 'string' ? flags.get('--uv-bits') : undefined, 10, '--uv-bits'),
   quantizationVolume: parseChoiceFlag(
     typeof flags.get('--volume') === 'string' ? flags.get('--volume') : undefined,
     'mesh',
     '--volume',
-    ['mesh', 'scene', 'bbox'],
+    ['mesh', 'scene'],
   ),
 };
 
@@ -166,15 +152,14 @@ async function listModels(dir: string): Promise<string[]> {
   return files;
 }
 
-async function compressFile(io: NodeIO, inputPath: string, outputPath: string): Promise<void> {
-  const doc = await io.read(inputPath);
-  doc.createExtension(KHRDracoMeshCompression)
-    .setRequired(true)
-    .setEncoderOptions(compressionOptions);
-
-  const output = await io.writeBinary(doc);
+async function compressFile(inputPath: string, outputPath: string): Promise<void> {
   await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, output);
+
+  const command = Bun.$`bunx @gltf-transform/cli draco ${inputPath} ${outputPath} --method ${compressionOptions.method} --encode-speed ${compressionOptions.encodeSpeed} --decode-speed ${compressionOptions.decodeSpeed} --quantize-position ${compressionOptions.quantizePosition} --quantize-normal ${compressionOptions.quantizeNormal} --quantize-texcoord ${compressionOptions.quantizeTexcoord} --quantization-volume ${compressionOptions.quantizationVolume}`;
+  const result = await command;
+  if (result.exitCode !== 0) {
+    throw new Error(`gltf-transform draco failed for ${inputPath}`);
+  }
 }
 
 function resolveOutputPath(inputPath: string): string {
@@ -195,12 +180,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  const io = new NodeIO()
-    .registerExtensions([KHRDracoMeshCompression, KHRMaterialsTransmission, KHRTextureTransform])
-    .registerDependencies({
-      'draco3d.encoder': await draco3d.createEncoderModule({}),
-      'draco3d.decoder': await draco3d.createDecoderModule({}),
-    });
   console.log(`Found ${models.length} model(s)`);
 
   let failedCount = 0;
@@ -209,7 +188,7 @@ async function main(): Promise<void> {
     const outputPath = resolveOutputPath(inputPath);
     process.stdout.write(`\r[${index + 1}/${models.length}] ${relative}             `);
     try {
-      await compressFile(io, inputPath, outputPath);
+      await compressFile(inputPath, outputPath);
     } catch (err) {
       failedCount += 1;
       const message = err instanceof Error ? err.message : String(err);

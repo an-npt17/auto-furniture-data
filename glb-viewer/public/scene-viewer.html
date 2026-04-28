@@ -111,6 +111,10 @@
         overflow: hidden;
       }
 
+      #sidebar.dropdown-open {
+        overflow: visible;
+      }
+
       #details-panel {
         border-top: 1px solid #333;
         padding: 12px 14px;
@@ -120,6 +124,12 @@
         background: #1b1b1b;
         max-height: 42%;
         overflow: auto;
+      }
+
+      #details-panel.dropdown-open {
+        overflow: visible;
+        position: relative;
+        z-index: 2;
       }
 
       #details-panel.hidden {
@@ -351,18 +361,28 @@
             <label for="field-category">Category</label>
             <select id="field-category">
               <option value="">-- Select category --</option>
-              <option value="Bàn ghế">Bàn ghế</option>
-              <option value="Cây cảnh">Cây cảnh</option>
-              <option value="Chiếu sáng">Chiếu sáng</option>
-              <option value="Kiến trúc">Kiến trúc</option>
-              <option value="Lưu trữ">Lưu trữ</option>
-              <option value="Phòng khách">Phòng khách</option>
-              <option value="Phòng ngủ">Phòng ngủ</option>
-              <option value="Phòng bếp">Phòng bếp</option>
-              <option value="Thảm">Thảm</option>
-              <option value="Trang trí">Trang trí</option>
-              <option value="Văn phòng">Văn phòng</option>
-              <option value="XHome">XHome</option>
+              <option value="bedroom">bedroom</option>
+              <option value="storage">storage</option>
+              <option value="tables-chairs">tables-chairs</option>
+              <option value="sofa">sofa</option>
+              <option value="lighting">lighting</option>
+              <option value="plants">plants</option>
+              <option value="xhome">xhome</option>
+              <option value="other">other</option>
+              <option value="rugs">rugs</option>
+              <option value="architecture">architecture</option>
+              <option value="decor">decor</option>
+              <option value="office">office</option>
+              <option value="living-room">living-room</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="field-object-role">Object Role</label>
+            <select id="field-object-role">
+              <option value="">-- No object role --</option>
+              <option value="null">null</option>
+              <option value="window">window</option>
+              <option value="door">door</option>
             </select>
           </div>
           <div class="field">

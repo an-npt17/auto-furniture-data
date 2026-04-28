@@ -3,22 +3,41 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
+interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface Quat4 {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+}
+
 interface MetadataEntry {
   id: string;
   name: string;
   category: string;
-  objectRole?: "window" | "door" | null;
   shape: string;
   size: number[];
   placementType: string;
   color: string;
   modelUrl: string;
-  position: { x: number; y: number; z: number };
+  position: Vec3;
+  rotation?: Quat4;
 }
 
-interface MetadataDocument {
-  objects: MetadataEntry[];
-  [key: string]: unknown;
+interface TransformSnapshot {
+  id: string;
+  name: string;
+  category: string;
+  placementType: string;
+  position: Vec3;
+  rotation: Quat4;
+  worldSize: Vec3;
+  metadataSize: Vec3 | null;
 }
 
 type SceneMaterial = THREE.Material & {
@@ -35,9 +54,79 @@ type SceneMaterial = THREE.Material & {
   };
 };
 
-const HIGHLIGHT_COLOR = new THREE.Color(0.2, 0.4, 0.8);
+const HIGHLIGHT_COLOR = new THREE.Color(0.23, 0.52, 0.98);
+const DEFAULT_POSITION: Vec3 = { x: 0, y: 0, z: 0 };
+const DEFAULT_ROTATION: Quat4 = { x: 0, y: 0, z: 0, w: 1 };
 
-class SceneViewer {
+function cloneVec3(value: Vec3): Vec3 {
+  return { x: value.x, y: value.y, z: value.z };
+}
+
+function cloneQuat4(value: Quat4): Quat4 {
+  return { x: value.x, y: value.y, z: value.z, w: value.w };
+}
+
+function vec3From(
+  input: Partial<Vec3> | null | undefined,
+  fallback: Vec3,
+): Vec3 {
+  if (!input) return cloneVec3(fallback);
+  return {
+    x: Number.isFinite(input.x) ? input.x : fallback.x,
+    y: Number.isFinite(input.y) ? input.y : fallback.y,
+    z: Number.isFinite(input.z) ? input.z : fallback.z,
+  };
+}
+
+function vec3FromArray(
+  input: number[] | null | undefined,
+  fallback: Vec3,
+): Vec3 {
+  if (!Array.isArray(input) || input.length < 3) return cloneVec3(fallback);
+  return {
+    x: Number.isFinite(input[0]) ? input[0] : fallback.x,
+    y: Number.isFinite(input[1]) ? input[1] : fallback.y,
+    z: Number.isFinite(input[2]) ? input[2] : fallback.z,
+  };
+}
+
+function vec3FromArrayOrNull(input: number[] | null | undefined): Vec3 | null {
+  if (!Array.isArray(input) || input.length < 3) return null;
+
+  const [x, y, z] = input;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+
+  return { x, y, z };
+}
+
+function quatFrom(
+  input: Partial<Quat4> | null | undefined,
+  fallback: Quat4,
+): Quat4 {
+  if (!input) return cloneQuat4(fallback);
+
+  return {
+    x: Number.isFinite(input.x) ? input.x : fallback.x,
+    y: Number.isFinite(input.y) ? input.y : fallback.y,
+    z: Number.isFinite(input.z) ? input.z : fallback.z,
+    w: Number.isFinite(input.w) ? input.w : fallback.w,
+  };
+}
+
+function formatNumber(value: number, digits = 2): string {
+  return Number.isFinite(value) ? value.toFixed(digits) : "0.00";
+}
+
+function formatVec3(value: Vec3, digits = 2): string {
+  return `${formatNumber(value.x, digits)} × ${formatNumber(
+    value.y,
+    digits,
+  )} × ${formatNumber(value.z, digits)}`;
+}
+
+class SceneEditor {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -50,30 +139,16 @@ class SceneViewer {
   private loadedMeshes: Map<string, THREE.Mesh[]> = new Map();
   private loadedRoots: Map<string, THREE.Object3D> = new Map();
   private metadataEntries: MetadataEntry[] = [];
-  private metadataDocument: MetadataDocument | null = null;
   private selectedId: string | null = null;
   private selectionListener: ((id: string | null) => void) | null = null;
-  private usePresetColors = false;
   private currentFolder: string | null = null;
 
   setSelectionListener(listener: ((id: string | null) => void) | null): void {
     this.selectionListener = listener;
   }
 
-  setUsePresetColors(enabled: boolean): void {
-    this.usePresetColors = enabled;
-  }
-
-  getSelectedId(): string | null {
-    return this.selectedId;
-  }
-
   getMetadataEntries(): MetadataEntry[] {
     return this.metadataEntries;
-  }
-
-  getMetadataDocument(): MetadataDocument | null {
-    return this.metadataDocument;
   }
 
   getEntry(id: string): MetadataEntry | undefined {
@@ -82,12 +157,6 @@ class SceneViewer {
 
   getCurrentFolder(): string | null {
     return this.currentFolder;
-  }
-
-  updateEntry(id: string, patch: Partial<MetadataEntry>): void {
-    const entry = this.metadataEntries.find((item) => item.id === id);
-    if (!entry) return;
-    Object.assign(entry, patch);
   }
 
   constructor(canvasId: string) {
@@ -110,7 +179,7 @@ class SceneViewer {
     this.renderer.toneMappingExposure = 1;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xc8ccd9);
+    this.scene.background = new THREE.Color(0x0d1117);
 
     this.camera = new THREE.PerspectiveCamera(
       50,
@@ -161,22 +230,21 @@ class SceneViewer {
   }
 
   private setupScene(): void {
-    const ambient = new THREE.HemisphereLight(0xffffff, 0x8c93a6, 1.1);
+    const ambient = new THREE.HemisphereLight(0xdde8ff, 0x253148, 1.2);
     this.scene.add(ambient);
 
-    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.0);
-    dirLight1.position.set(6, 12, 5);
-    dirLight1.castShadow = true;
-    this.scene.add(dirLight1);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    keyLight.position.set(6, 12, 5);
+    this.scene.add(keyLight);
 
-    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.45);
-    dirLight2.position.set(-6, 8, -6);
-    this.scene.add(dirLight2);
+    const fillLight = new THREE.DirectionalLight(0xcfe0ff, 0.5);
+    fillLight.position.set(-7, 5, -8);
+    this.scene.add(fillLight);
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(1000, 1000),
       new THREE.MeshStandardMaterial({
-        color: 0x66666f,
+        color: 0x111824,
         roughness: 1,
         metalness: 0,
       }),
@@ -187,9 +255,13 @@ class SceneViewer {
     ground.name = "ground";
     this.scene.add(ground);
 
-    const grid = new THREE.GridHelper(1000, 50, 0x80808a, 0x55555e);
+    const grid = new THREE.GridHelper(1000, 50, 0x38506d, 0x1f2a3a);
     grid.position.y = 0.01;
     this.scene.add(grid);
+
+    const axes = new THREE.AxesHelper(2.5);
+    axes.position.set(0, 0.02, 0);
+    this.scene.add(axes);
   }
 
   private setupInteractions(): void {
@@ -223,8 +295,8 @@ class SceneViewer {
     const zoomFactor = Math.exp(event.deltaY * 0.0015);
     this.camera.fov = THREE.MathUtils.clamp(
       this.camera.fov * zoomFactor,
-      15,
-      90,
+      25,
+      75,
     );
     this.camera.updateProjectionMatrix();
   };
@@ -277,18 +349,12 @@ class SceneViewer {
       throw new Error(`Failed to load metadata.json from ${folder}`);
     }
 
-    const raw = (await response.json()) as MetadataEntry[] | MetadataDocument;
-    const entries = Array.isArray(raw) ? raw : raw.objects;
-
-    if (!Array.isArray(entries)) {
-      throw new Error("Unsupported metadata.json structure");
-    }
-
+    const entries = (await response.json()) as MetadataEntry[];
     this.metadataEntries = entries;
-    this.metadataDocument = Array.isArray(raw) ? null : raw;
 
     this.showLoading(true, `Loading ${entries.length} objects...`);
     let loaded = 0;
+    let revealed = false;
 
     for (const entry of entries) {
       const fileName = entry.modelUrl.replace(/^\/models\//, "");
@@ -298,12 +364,21 @@ class SceneViewer {
         await this.loadGLB(entry, glbURL);
         loaded += 1;
         this.updateLoadingProgress(`${loaded}/${entries.length} objects`);
+
+        if (!revealed) {
+          revealed = true;
+          this.selectObject(entry.id);
+          this.focusSelected();
+          this.showLoading(false);
+        }
       } catch (error) {
         console.warn(`Skipped ${entry.id}: ${(error as Error).message}`);
       }
     }
 
-    this.showLoading(false);
+    if (!revealed) {
+      this.showLoading(false);
+    }
     this.focusCamera();
   }
 
@@ -339,7 +414,20 @@ class SceneViewer {
     this.scene.add(root);
     this.loadedRoots.set(entry.id, root);
     this.loadedMeshes.set(entry.id, meshes);
+    this.applyEntryTransform(root, entry);
     this.refreshSelectionState(entry.id);
+  }
+
+  private applyEntryTransform(
+    root: THREE.Object3D,
+    entry: MetadataEntry,
+  ): void {
+    const position = vec3From(entry.position, DEFAULT_POSITION);
+    const rotation = quatFrom(entry.rotation, DEFAULT_ROTATION);
+
+    root.position.set(position.x, position.y, position.z);
+    root.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    root.updateMatrixWorld(true);
   }
 
   private cloneMaterial(
@@ -355,9 +443,7 @@ class SceneViewer {
     }
 
     const fallback = new THREE.MeshStandardMaterial({
-      color: this.usePresetColors
-        ? this.colorFromHash(this.hashCode(id))
-        : 0xb8b8b8,
+      color: 0xb8b8b8,
       roughness: 0.8,
       metalness: 0.05,
     });
@@ -367,7 +453,7 @@ class SceneViewer {
 
   private cloneSingleMaterial(
     material: THREE.Material,
-    id: string,
+    _id: string,
   ): THREE.Material {
     const cloned = material.clone();
     this.captureBaseMaterialState(cloned as SceneMaterial);
@@ -395,12 +481,7 @@ class SceneViewer {
     for (const item of materials) {
       const typed = item as SceneMaterial;
 
-      if (
-        this.usePresetColors &&
-        typed.color &&
-        !typed.map &&
-        this.isWhiteColor(typed.color)
-      ) {
+      if (typed.color && !typed.map && this.isWhiteColor(typed.color)) {
         typed.color.copy(this.colorFromHash(this.hashCode(id)));
       }
 
@@ -494,6 +575,70 @@ class SceneViewer {
     this.selectionListener?.(id);
   }
 
+  updateEntry(id: string, patch: Partial<MetadataEntry>): void {
+    const entry = this.metadataEntries.find((item) => item.id === id);
+    if (!entry) return;
+
+    if (patch.name !== undefined) entry.name = patch.name;
+    if (patch.category !== undefined) entry.category = patch.category;
+    if (patch.shape !== undefined) entry.shape = patch.shape;
+    if (patch.size !== undefined) entry.size = [...patch.size];
+    if (patch.placementType !== undefined)
+      entry.placementType = patch.placementType;
+    if (patch.color !== undefined) entry.color = patch.color;
+    if (patch.modelUrl !== undefined) entry.modelUrl = patch.modelUrl;
+    if (patch.position !== undefined)
+      entry.position = cloneVec3(patch.position);
+    if (patch.rotation !== undefined)
+      entry.rotation = cloneVec3(patch.rotation);
+
+    const root = this.loadedRoots.get(id);
+    if (!root) return;
+
+    if (patch.position !== undefined) {
+      root.position.copy(
+        new THREE.Vector3(entry.position.x, entry.position.y, entry.position.z),
+      );
+    }
+
+    if (patch.rotation !== undefined) {
+      const rotation = quatFrom(entry.rotation, DEFAULT_ROTATION);
+      root.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    }
+
+    root.updateMatrixWorld(true);
+  }
+
+  getSnapshot(id: string): TransformSnapshot | null {
+    const entry = this.getEntry(id);
+    const root = this.loadedRoots.get(id);
+    if (!entry || !root) return null;
+
+    root.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(root);
+    const size = bounds.getSize(new THREE.Vector3());
+
+    return {
+      id: entry.id,
+      name: entry.name,
+      category: entry.category,
+      placementType: entry.placementType,
+      position: cloneVec3(entry.position),
+      rotation: cloneQuat4(root.quaternion),
+      worldSize: {
+        x: size.x,
+        y: size.y,
+        z: size.z,
+      },
+      metadataSize: vec3FromArrayOrNull(entry.size),
+    };
+  }
+
+  getSelectedSnapshot(): TransformSnapshot | null {
+    if (!this.selectedId) return null;
+    return this.getSnapshot(this.selectedId);
+  }
+
   isSelected(id: string): boolean {
     return this.selectedId === id;
   }
@@ -511,7 +656,6 @@ class SceneViewer {
     this.loadedMeshes.clear();
     this.loadedRoots.clear();
     this.metadataEntries = [];
-    this.metadataDocument = null;
     this.selectedId = null;
     this.currentFolder = null;
     this.selectionListener?.(null);
@@ -533,6 +677,41 @@ class SceneViewer {
 
   resetCamera(): void {
     this.focusCamera();
+  }
+
+  focusSelected(): void {
+    if (!this.selectedId) {
+      this.focusCamera();
+      return;
+    }
+
+    const root = this.loadedRoots.get(this.selectedId);
+    if (!root) {
+      this.focusCamera();
+      return;
+    }
+
+    this.focusObject(root);
+  }
+
+  private focusObject(object: THREE.Object3D): void {
+    const box = new THREE.Box3().setFromObject(object);
+    if (box.isEmpty()) {
+      this.camera.position.set(0, 2, -8);
+      this.camera.lookAt(0, 0, 0);
+      return;
+    }
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const radius = Math.max(size.length() * 0.5, 1);
+
+    this.camera.position.set(
+      center.x,
+      center.y + Math.max(radius * 0.35, 2),
+      center.z - Math.max(radius * 1.8, 8),
+    );
+    this.camera.lookAt(center);
   }
 
   private focusCamera(): void {
@@ -610,28 +789,43 @@ class SceneViewer {
   }
 }
 
-class UIController {
-  private viewer: SceneViewer;
+type VectorInputs = {
+  x: HTMLInputElement;
+  y: HTMLInputElement;
+  z: HTMLInputElement;
+};
+
+type QuaternionInputs = {
+  x: HTMLInputElement;
+  y: HTMLInputElement;
+  z: HTMLInputElement;
+  w: HTMLInputElement;
+};
+
+class EditorController {
+  private viewer: SceneEditor;
   private folderSelect: HTMLSelectElement;
   private btnLoadFolder: HTMLButtonElement;
   private objectList: HTMLElement;
   private listCount: HTMLElement;
   private objectCount: HTMLElement;
   private btnResetCamera: HTMLButtonElement;
+  private btnFocusSelected: HTMLButtonElement;
+  private btnResetTransform: HTMLButtonElement;
   private btnClearScene: HTMLButtonElement;
-  private togglePresets: HTMLInputElement;
-  private detailsPanel: HTMLElement;
-  private sidebar: HTMLElement;
-  private fieldName: HTMLInputElement;
-  private fieldCategory: HTMLSelectElement;
-  private fieldObjectRole: HTMLSelectElement;
-  private fieldPlacementType: HTMLSelectElement;
   private btnSaveMetadata: HTMLButtonElement;
+  private inspectorPanel: HTMLElement;
+  private selectionTitle: HTMLElement;
+  private selectionSubtitle: HTMLElement;
+  private positionInputs: VectorInputs;
+  private rotationInputs: QuaternionInputs;
+  private boundsReadout: HTMLElement;
+  private metadataSizeReadout: HTMLElement;
   private saveStatus: HTMLElement;
   private activeId: string | null = null;
 
   constructor() {
-    this.viewer = new SceneViewer("render-canvas");
+    this.viewer = new SceneEditor("render-canvas");
 
     this.folderSelect = document.getElementById(
       "folder-select",
@@ -645,31 +839,47 @@ class UIController {
     this.btnResetCamera = document.getElementById(
       "btn-reset-camera",
     ) as HTMLButtonElement;
+    this.btnFocusSelected = document.getElementById(
+      "btn-focus-selected",
+    ) as HTMLButtonElement;
+    this.btnResetTransform = document.getElementById(
+      "btn-reset-transform",
+    ) as HTMLButtonElement;
     this.btnClearScene = document.getElementById(
       "btn-clear-scene",
     ) as HTMLButtonElement;
-    this.togglePresets = document.getElementById(
-      "toggle-presets",
-    ) as HTMLInputElement;
-    this.sidebar = document.getElementById("sidebar") as HTMLElement;
-    this.detailsPanel = document.getElementById("details-panel") as HTMLElement;
-    this.fieldName = document.getElementById("field-name") as HTMLInputElement;
-    this.fieldCategory = document.getElementById(
-      "field-category",
-    ) as HTMLSelectElement;
-    this.fieldObjectRole = document.getElementById(
-      "field-object-role",
-    ) as HTMLSelectElement;
-    this.fieldPlacementType = document.getElementById(
-      "field-placement-type",
-    ) as HTMLSelectElement;
     this.btnSaveMetadata = document.getElementById(
       "btn-save-metadata",
     ) as HTMLButtonElement;
+    this.inspectorPanel = document.getElementById(
+      "inspector-panel",
+    ) as HTMLElement;
+    this.selectionTitle = document.getElementById(
+      "selection-title",
+    ) as HTMLElement;
+    this.selectionSubtitle = document.getElementById(
+      "selection-subtitle",
+    ) as HTMLElement;
+    this.positionInputs = {
+      x: document.getElementById("position-x") as HTMLInputElement,
+      y: document.getElementById("position-y") as HTMLInputElement,
+      z: document.getElementById("position-z") as HTMLInputElement,
+    };
+      this.rotationInputs = {
+        x: document.getElementById("rotation-x") as HTMLInputElement,
+        y: document.getElementById("rotation-y") as HTMLInputElement,
+        z: document.getElementById("rotation-z") as HTMLInputElement,
+        w: document.getElementById("rotation-w") as HTMLInputElement,
+      };
+    this.boundsReadout = document.getElementById(
+      "bounds-readout",
+    ) as HTMLElement;
+    this.metadataSizeReadout = document.getElementById(
+      "metadata-size-readout",
+    ) as HTMLElement;
     this.saveStatus = document.getElementById("save-status") as HTMLElement;
 
-    this.viewer.setSelectionListener((id) => this.showDetails(id));
-    this.viewer.setUsePresetColors(false);
+    this.viewer.setSelectionListener((id) => this.showSelection(id));
     this.setupEventListeners();
     void this.loadFolderList();
   }
@@ -688,7 +898,7 @@ class UIController {
         this.folderSelect.appendChild(option);
       }
 
-      if (folders.length === 1) {
+      if (folders.length > 0) {
         this.folderSelect.value = folders[0]!;
         void this.loadSelectedFolder();
       }
@@ -706,6 +916,9 @@ class UIController {
       await this.viewer.loadMetadataFolder(folder);
       this.updateObjectList();
       this.updateObjectCount();
+      if (this.activeId) {
+        this.showSelection(this.activeId);
+      }
     } catch (error) {
       alert("Error loading folder: " + (error as Error).message);
     }
@@ -717,112 +930,154 @@ class UIController {
       () => void this.loadSelectedFolder(),
     );
 
-    this.btnResetCamera.addEventListener("click", () =>
-      this.viewer.resetCamera(),
-    );
+    this.btnResetCamera.addEventListener("click", () => {
+      this.viewer.resetCamera();
+    });
+
+    this.btnFocusSelected.addEventListener("click", () => {
+      this.viewer.focusSelected();
+    });
+
+    this.btnResetTransform.addEventListener("click", () => {
+      if (!this.activeId) return;
+      this.viewer.updateEntry(this.activeId, {
+        position: cloneVec3(DEFAULT_POSITION),
+        rotation: cloneQuat4(DEFAULT_ROTATION),
+      });
+      this.renderSelection(this.activeId, true);
+    });
 
     this.btnClearScene.addEventListener("click", () => {
       if (confirm("Clear all objects from the scene?")) {
         this.viewer.clearScene();
         this.updateObjectList();
         this.updateObjectCount();
-        this.showDetails(null);
+        this.showSelection(null);
       }
-    });
-
-    this.togglePresets.addEventListener("change", () => {
-      this.viewer.setUsePresetColors(this.togglePresets.checked);
     });
 
     this.btnSaveMetadata.addEventListener(
       "click",
-      () => void this.saveCurrentEntry(),
+      () => void this.saveCurrentFolder(),
     );
 
-    [this.fieldCategory, this.fieldObjectRole, this.fieldPlacementType].forEach(
-      (select) => {
-        select.addEventListener("focus", () => this.setDropdownOpen(true));
-        select.addEventListener("pointerdown", () =>
-          this.setDropdownOpen(true),
-        );
-        select.addEventListener("blur", () => this.setDropdownOpen(false));
-        select.addEventListener("change", () => this.setDropdownOpen(false));
-        select.addEventListener("keydown", (event) => {
-          if (event.key === "Escape") {
-            this.setDropdownOpen(false);
-          }
-        });
-      },
+    this.bindVectorInputs(this.positionInputs, () => this.commitTransform());
+    this.bindQuaternionInputs(this.rotationInputs, () =>
+      this.commitTransform(),
     );
   }
 
-  private setDropdownOpen(isOpen: boolean): void {
-    this.sidebar.classList.toggle("dropdown-open", isOpen);
-    this.detailsPanel.classList.toggle("dropdown-open", isOpen);
+  private bindVectorInputs(inputs: VectorInputs, handler: () => void): void {
+    inputs.x.addEventListener("input", handler);
+    inputs.y.addEventListener("input", handler);
+    inputs.z.addEventListener("input", handler);
+  }
+
+  private bindQuaternionInputs(
+    inputs: QuaternionInputs,
+    handler: () => void,
+  ): void {
+    inputs.x.addEventListener("input", handler);
+    inputs.y.addEventListener("input", handler);
+    inputs.z.addEventListener("input", handler);
+    inputs.w.addEventListener("input", handler);
+  }
+
+  private readVectorInputs(inputs: VectorInputs, min = -Infinity): Vec3 {
+    const values = [inputs.x, inputs.y, inputs.z].map(
+      (input) => input.valueAsNumber,
+    );
+    return {
+      x: Number.isFinite(values[0])
+        ? Math.max(values[0]!, min)
+        : min === -Infinity
+          ? 0
+          : min,
+      y: Number.isFinite(values[1])
+        ? Math.max(values[1]!, min)
+        : min === -Infinity
+          ? 0
+          : min,
+      z: Number.isFinite(values[2])
+        ? Math.max(values[2]!, min)
+        : min === -Infinity
+          ? 0
+          : min,
+    };
+  }
+
+  private writeVectorInputs(inputs: VectorInputs, value: Vec3): void {
+    inputs.x.value = formatNumber(value.x, 4);
+    inputs.y.value = formatNumber(value.y, 4);
+    inputs.z.value = formatNumber(value.z, 4);
+  }
+
+  private readQuaternionInputs(inputs: QuaternionInputs): Quat4 {
+    const values = [inputs.x, inputs.y, inputs.z, inputs.w].map(
+      (input) => input.valueAsNumber,
+    );
+
+    return {
+      x: Number.isFinite(values[0]) ? values[0]! : 0,
+      y: Number.isFinite(values[1]) ? values[1]! : 0,
+      z: Number.isFinite(values[2]) ? values[2]! : 0,
+      w: Number.isFinite(values[3]) ? values[3]! : 1,
+    };
+  }
+
+  private writeQuaternionInputs(inputs: QuaternionInputs, value: Quat4): void {
+    inputs.x.value = formatNumber(value.x, 6);
+    inputs.y.value = formatNumber(value.y, 6);
+    inputs.z.value = formatNumber(value.z, 6);
+    inputs.w.value = formatNumber(value.w, 6);
+  }
+
+  private commitTransform(): void {
+    if (!this.activeId) return;
+
+    const position = this.readVectorInputs(this.positionInputs);
+    const rotation = this.readQuaternionInputs(this.rotationInputs);
+
+    this.viewer.updateEntry(this.activeId, {
+      position,
+      rotation,
+    });
+    this.renderSelection(this.activeId, true);
   }
 
   private syncSelectedListItem(id: string | null): void {
-    this.objectList.querySelectorAll(".object-item").forEach((element) => {
-      const item = element as HTMLElement;
-      item.classList.toggle("selected", item.dataset.objectId === id);
-    });
+    this.objectList
+      .querySelectorAll<HTMLElement>(".object-item")
+      .forEach((row) => {
+        row.classList.toggle("selected", row.dataset.objectId === id);
+      });
   }
 
-  private setSelectValuePreservingUnknown(
-    select: HTMLSelectElement,
-    value: string,
-  ): void {
-    if (!Array.from(select.options).some((option) => option.value === value)) {
-      select.add(new Option(value, value), 1);
-    }
-
-    select.value = value;
-  }
-
-  private async saveCurrentEntry(): Promise<void> {
-    if (!this.activeId) return;
-
+  private async saveCurrentFolder(): Promise<void> {
     const folder = this.viewer.getCurrentFolder();
     if (!folder) return;
 
-    this.viewer.updateEntry(this.activeId, {
-      name: this.fieldName.value.trim(),
-      category: this.fieldCategory.value,
-      objectRole: this.fieldObjectRole.value
-        ? this.fieldObjectRole.value === "null"
-          ? null
-          : (this.fieldObjectRole.value as "window" | "door")
-        : undefined,
-      placementType: this.fieldPlacementType.value,
-    });
-
     try {
-      const data = this.viewer.getMetadataEntries();
-      const payload = this.viewer.getMetadataDocument()
-        ? { ...(this.viewer.getMetadataDocument() as MetadataDocument), objects: data }
-        : data;
-
       const response = await fetch("/api/save-metadata", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           folder,
-          data: payload,
+          data: this.viewer.getMetadataEntries(),
         }),
       });
 
       if (response.ok) {
         this.saveStatus.textContent = "Saved!";
-        this.saveStatus.style.color = "#6a6";
-        this.updateObjectList();
+        this.saveStatus.style.color = "#6fcf97";
       } else {
         const err = (await response.json()) as { error?: string };
         this.saveStatus.textContent = `Error: ${err.error ?? "Unknown error"}`;
-        this.saveStatus.style.color = "#a66";
+        this.saveStatus.style.color = "#f87171";
       }
     } catch {
       this.saveStatus.textContent = "Network error";
-      this.saveStatus.style.color = "#a66";
+      this.saveStatus.style.color = "#f87171";
     }
 
     setTimeout(() => {
@@ -864,10 +1119,6 @@ class UIController {
       item.appendChild(catSpan);
 
       item.addEventListener("click", () => {
-        this.objectList.querySelectorAll(".object-item").forEach((element) => {
-          element.classList.remove("selected");
-        });
-        item.classList.add("selected");
         this.viewer.selectObject(entry.id);
       });
 
@@ -883,32 +1134,52 @@ class UIController {
         : `${count} object${count === 1 ? "" : "s"} loaded`;
   }
 
-  private showDetails(id: string | null): void {
+  private showSelection(id: string | null): void {
     this.activeId = id;
     this.syncSelectedListItem(id);
+    this.renderSelection(id, true);
+  }
+
+  private renderSelection(id: string | null, refreshInputs: boolean): void {
+    const hasSelection = Boolean(id);
+    this.inspectorPanel.classList.toggle("hidden", !hasSelection);
+    this.btnFocusSelected.disabled = !hasSelection;
+    this.btnResetTransform.disabled = !hasSelection;
+
     if (!id) {
-      this.detailsPanel.classList.add("hidden");
+      this.selectionTitle.textContent = "No object selected";
+      this.selectionSubtitle.textContent = "Load a folder and click an object";
+      this.writeQuaternionInputs(this.rotationInputs, DEFAULT_ROTATION);
+      this.boundsReadout.textContent = "—";
+      this.metadataSizeReadout.textContent = "—";
       return;
     }
 
-    const entry = this.viewer.getEntry(id);
-    if (!entry) {
-      this.detailsPanel.classList.add("hidden");
+    const snapshot = this.viewer.getSnapshot(id);
+    if (!snapshot) {
+      this.selectionTitle.textContent = "Selection unavailable";
+      this.selectionSubtitle.textContent = id;
+      this.writeQuaternionInputs(this.rotationInputs, DEFAULT_ROTATION);
+      this.boundsReadout.textContent = "—";
+      this.metadataSizeReadout.textContent = "—";
       return;
     }
 
-    this.detailsPanel.classList.remove("hidden");
-    this.fieldName.value = entry.name;
-    this.setSelectValuePreservingUnknown(this.fieldCategory, entry.category);
-    this.fieldObjectRole.value =
-      entry.objectRole === null
-        ? "null"
-        : entry.objectRole ?? "";
-    this.fieldPlacementType.value = entry.placementType;
-    this.saveStatus.textContent = "";
+    this.selectionTitle.textContent = snapshot.name || snapshot.id;
+    this.selectionSubtitle.textContent = `${snapshot.id} · ${snapshot.category} · ${snapshot.placementType}`;
+
+    if (refreshInputs) {
+      this.writeVectorInputs(this.positionInputs, snapshot.position);
+      this.writeQuaternionInputs(this.rotationInputs, snapshot.rotation);
+    }
+
+    this.boundsReadout.textContent = formatVec3(snapshot.worldSize, 2);
+    this.metadataSizeReadout.textContent = snapshot.metadataSize
+      ? formatVec3(snapshot.metadataSize, 2)
+      : "—";
   }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  new UIController();
+  new EditorController();
 });
