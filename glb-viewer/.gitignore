@@ -35,3 +35,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # git worktrees
 .worktrees
+
+# python caches
+__pycache__
+output/

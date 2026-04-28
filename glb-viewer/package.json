@@ -21,9 +21,14 @@
     "@babylonjs/inspector": "^9.1.0",
     "@babylonjs/loaders": "^9.1.0",
     "@babylonjs/serializers": "^9.1.0",
+    "@gltf-transform/cli": "^4.3.0",
     "@gltf-transform/core": "^4.3.0",
     "@gltf-transform/extensions": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0",
     "draco3dgltf": "^1.5.7",
+    "gl-matrix": "^3.4.4",
+    "lodash": "^4.18.1",
+    "sharp": "^0.34.5",
     "three": "^0.182.0"
   }
 }
