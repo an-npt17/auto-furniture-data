@@ -21,6 +21,7 @@ interface MetadataEntry {
   name: string;
   category: string;
   objectRole?: "window" | "door" | null;
+  price: string;
   shape: string;
   size: [number, number, number];
   placementType: string;
@@ -40,6 +41,7 @@ interface RawMetadataEntry {
   name?: unknown;
   category?: unknown;
   objectRole?: unknown;
+  price?: unknown;
   shape?: unknown;
   type?: unknown;
   size?: unknown;
@@ -171,9 +173,10 @@ function normalizeObjectRole(
   return undefined;
 }
 
-function normalizeMetadata(
-  raw: RawMetadata,
-): { entries: MetadataEntry[]; document: MetadataDocument | null } {
+function normalizeMetadata(raw: RawMetadata): {
+  entries: MetadataEntry[];
+  document: MetadataDocument | null;
+} {
   const rawEntries = Array.isArray(raw) ? raw : raw.objects;
   if (!Array.isArray(rawEntries)) {
     throw new Error("Unsupported metadata.json structure");
@@ -200,6 +203,7 @@ function normalizeMetadataEntry(
   const name = readString(entry.name, id);
   const category = readString(entry.category, "");
   const shape = readString(entry.shape ?? entry.type, "model");
+  const price = readString(entry.price, "");
   const sizeValue = scaleVec3(
     vec3FromValue(entry.size ?? entry.scale, DEFAULT_SIZE),
     LINEAR_UNIT_SCALE,
@@ -217,6 +221,7 @@ function normalizeMetadataEntry(
     name,
     category,
     objectRole: normalizeObjectRole(entry.objectRole),
+    price,
     shape,
     size: [sizeValue.x, sizeValue.y, sizeValue.z],
     placementType,
@@ -281,10 +286,7 @@ class SceneViewer {
     Object.assign(entry, patch);
   }
 
-  constructor(
-    canvasId: string,
-    options?: { normalizeMetadata?: boolean },
-  ) {
+  constructor(canvasId: string, options?: { normalizeMetadata?: boolean }) {
     this.normalizeMetadata = options?.normalizeMetadata ?? false;
     this.canvas = document.getElementById(canvasId) as HTMLCanvasElement;
 
@@ -848,6 +850,7 @@ class UIController {
   private fieldName: HTMLInputElement;
   private fieldCategory: HTMLSelectElement;
   private fieldObjectRole: HTMLSelectElement;
+  private fieldPrice: HTMLInputElement;
   private fieldPlacementType: HTMLSelectElement;
   private btnSaveMetadata: HTMLButtonElement;
   private saveStatus: HTMLElement;
@@ -891,6 +894,9 @@ class UIController {
     this.fieldPlacementType = document.getElementById(
       "field-placement-type",
     ) as HTMLSelectElement;
+    this.fieldPrice = document.getElementById(
+      "field-price",
+    ) as HTMLInputElement;
     this.btnSaveMetadata = document.getElementById(
       "btn-save-metadata",
     ) as HTMLButtonElement;
@@ -1022,12 +1028,16 @@ class UIController {
           : (this.fieldObjectRole.value as "window" | "door")
         : undefined,
       placementType: this.fieldPlacementType.value,
+      price: this.fieldPrice.value,
     });
 
     try {
       const data = this.viewer.getMetadataEntries();
       const payload = this.viewer.getMetadataDocument()
-        ? { ...(this.viewer.getMetadataDocument() as MetadataDocument), objects: data }
+        ? {
+            ...(this.viewer.getMetadataDocument() as MetadataDocument),
+            objects: data,
+          }
         : data;
 
       const response = await fetch("/api/save-metadata", {
@@ -1129,10 +1139,9 @@ class UIController {
     this.fieldName.value = entry.name;
     this.setSelectValuePreservingUnknown(this.fieldCategory, entry.category);
     this.fieldObjectRole.value =
-      entry.objectRole === null
-        ? "null"
-        : entry.objectRole ?? "";
+      entry.objectRole === null ? "null" : (entry.objectRole ?? "");
     this.fieldPlacementType.value = entry.placementType;
+    this.fieldPrice.value = entry.price === null ? "" : (entry.price ?? "");
     this.saveStatus.textContent = "";
   }
 }

@@ -23,6 +23,7 @@ interface MetadataEntry {
   shape: string;
   size: number[];
   placementType: string;
+  price: string;
   color: string;
   modelUrl: string;
   position: Vec3;
@@ -34,6 +35,7 @@ interface TransformSnapshot {
   name: string;
   category: string;
   placementType: string;
+  price: string;
   position: Vec3;
   rotation: Quat4;
   worldSize: Vec3;
@@ -585,6 +587,7 @@ class SceneEditor {
     if (patch.size !== undefined) entry.size = [...patch.size];
     if (patch.placementType !== undefined)
       entry.placementType = patch.placementType;
+    if (patch.price !== undefined) entry.price = patch.price;
     if (patch.color !== undefined) entry.color = patch.color;
     if (patch.modelUrl !== undefined) entry.modelUrl = patch.modelUrl;
     if (patch.position !== undefined)
@@ -623,6 +626,7 @@ class SceneEditor {
       name: entry.name,
       category: entry.category,
       placementType: entry.placementType,
+      price: entry.price,
       position: cloneVec3(entry.position),
       rotation: cloneQuat4(root.quaternion),
       worldSize: {
@@ -865,12 +869,12 @@ class EditorController {
       y: document.getElementById("position-y") as HTMLInputElement,
       z: document.getElementById("position-z") as HTMLInputElement,
     };
-      this.rotationInputs = {
-        x: document.getElementById("rotation-x") as HTMLInputElement,
-        y: document.getElementById("rotation-y") as HTMLInputElement,
-        z: document.getElementById("rotation-z") as HTMLInputElement,
-        w: document.getElementById("rotation-w") as HTMLInputElement,
-      };
+    this.rotationInputs = {
+      x: document.getElementById("rotation-x") as HTMLInputElement,
+      y: document.getElementById("rotation-y") as HTMLInputElement,
+      z: document.getElementById("rotation-z") as HTMLInputElement,
+      w: document.getElementById("rotation-w") as HTMLInputElement,
+    };
     this.boundsReadout = document.getElementById(
       "bounds-readout",
     ) as HTMLElement;
