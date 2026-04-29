@@ -5,6 +5,7 @@ pkgs.mkShell {
   buildInputs = with pkgs; [
     nodejs
     bun
+    ktx-tools
     stdenv.cc.cc.lib
   ];
   shellHook = ''
