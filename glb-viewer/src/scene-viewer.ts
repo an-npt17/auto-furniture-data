@@ -3,23 +3,62 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
+interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface Quat4 {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+}
+
 interface MetadataEntry {
   id: string;
   name: string;
   category: string;
   objectRole?: "window" | "door" | null;
   shape: string;
-  size: number[];
+  size: [number, number, number];
   placementType: string;
   color: string;
   modelUrl: string;
-  position: { x: number; y: number; z: number };
+  position: Vec3;
+  rotation?: Quat4;
 }
 
 interface MetadataDocument {
   objects: MetadataEntry[];
   [key: string]: unknown;
 }
+
+interface RawMetadataEntry {
+  id?: unknown;
+  name?: unknown;
+  category?: unknown;
+  objectRole?: unknown;
+  shape?: unknown;
+  type?: unknown;
+  size?: unknown;
+  scale?: unknown;
+  placementType?: unknown;
+  color?: unknown;
+  modelUrl?: unknown;
+  position?: unknown;
+  location?: unknown;
+  rotation?: unknown;
+  [key: string]: unknown;
+}
+
+interface RawMetadataDocument {
+  objects?: RawMetadataEntry[];
+  [key: string]: unknown;
+}
+
+type RawMetadata = RawMetadataEntry[] | RawMetadataDocument;
 
 type SceneMaterial = THREE.Material & {
   color?: THREE.Color;
@@ -36,6 +75,157 @@ type SceneMaterial = THREE.Material & {
 };
 
 const HIGHLIGHT_COLOR = new THREE.Color(0.2, 0.4, 0.8);
+const DEFAULT_POSITION: Vec3 = { x: 0, y: 0, z: 0 };
+const DEFAULT_ROTATION: Quat4 = { x: 0, y: 0, z: 0, w: 1 };
+const DEFAULT_SIZE: Vec3 = { x: 0, y: 0, z: 0 };
+const LINEAR_UNIT_SCALE = 0.001;
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function toNumber(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function readString(value: unknown, fallback: string): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return fallback;
+  return String(value);
+}
+
+function vec3FromValue(input: unknown, fallback: Vec3): Vec3 {
+  if (Array.isArray(input)) {
+    return {
+      x: toNumber(input[0], fallback.x),
+      y: toNumber(input[1], fallback.y),
+      z: toNumber(input[2], fallback.z),
+    };
+  }
+
+  if (isObject(input)) {
+    return {
+      x: toNumber(input.x, fallback.x),
+      y: toNumber(input.y, fallback.y),
+      z: toNumber(input.z, fallback.z),
+    };
+  }
+
+  return { ...fallback };
+}
+
+function quatFromValue(input: unknown, fallback: Quat4): Quat4 {
+  if (Array.isArray(input) && input.length >= 4) {
+    const quat = {
+      x: toNumber(input[0], fallback.x),
+      y: toNumber(input[1], fallback.y),
+      z: toNumber(input[2], fallback.z),
+      w: toNumber(input[3], fallback.w),
+    };
+    return normalizeQuat(quat, fallback);
+  }
+
+  if (isObject(input)) {
+    const quat = {
+      x: toNumber(input.x, fallback.x),
+      y: toNumber(input.y, fallback.y),
+      z: toNumber(input.z, fallback.z),
+      w: toNumber(input.w, fallback.w),
+    };
+    return normalizeQuat(quat, fallback);
+  }
+
+  return { ...fallback };
+}
+
+function normalizeQuat(value: Quat4, fallback: Quat4): Quat4 {
+  const length = Math.hypot(value.x, value.y, value.z, value.w);
+  if (!Number.isFinite(length) || length === 0) return { ...fallback };
+  if (Math.abs(length - 1) < 1e-4) return value;
+  return {
+    x: value.x / length,
+    y: value.y / length,
+    z: value.z / length,
+    w: value.w / length,
+  };
+}
+
+function scaleVec3(value: Vec3, scale: number): Vec3 {
+  return {
+    x: value.x * scale,
+    y: value.y * scale,
+    z: value.z * scale,
+  };
+}
+
+function normalizeObjectRole(
+  value: unknown,
+): MetadataEntry["objectRole"] | undefined {
+  if (value === null || value === "null") return null;
+  if (value === "window" || value === "door") return value;
+  return undefined;
+}
+
+function normalizeMetadata(
+  raw: RawMetadata,
+): { entries: MetadataEntry[]; document: MetadataDocument | null } {
+  const rawEntries = Array.isArray(raw) ? raw : raw.objects;
+  if (!Array.isArray(rawEntries)) {
+    throw new Error("Unsupported metadata.json structure");
+  }
+
+  const entries = rawEntries
+    .map((entry, index) => normalizeMetadataEntry(entry, index))
+    .filter((entry): entry is MetadataEntry => Boolean(entry));
+
+  return {
+    entries,
+    document: Array.isArray(raw) ? null : (raw as MetadataDocument),
+  };
+}
+
+function normalizeMetadataEntry(
+  entry: RawMetadataEntry,
+  index: number,
+): MetadataEntry | null {
+  const modelUrl = readString(entry.modelUrl, "").trim();
+  if (!modelUrl) return null;
+
+  const id = readString(entry.id, "").trim() || `object-${index + 1}`;
+  const name = readString(entry.name, id);
+  const category = readString(entry.category, "");
+  const shape = readString(entry.shape ?? entry.type, "model");
+  const sizeValue = scaleVec3(
+    vec3FromValue(entry.size ?? entry.scale, DEFAULT_SIZE),
+    LINEAR_UNIT_SCALE,
+  );
+  const placementType = readString(entry.placementType, "floor");
+  const color = readString(entry.color, "#ffffff");
+  const position = scaleVec3(
+    vec3FromValue(entry.position ?? entry.location, DEFAULT_POSITION),
+    LINEAR_UNIT_SCALE,
+  );
+  const rotation = quatFromValue(entry.rotation, DEFAULT_ROTATION);
+
+  return {
+    id,
+    name,
+    category,
+    objectRole: normalizeObjectRole(entry.objectRole),
+    shape,
+    size: [sizeValue.x, sizeValue.y, sizeValue.z],
+    placementType,
+    color,
+    modelUrl,
+    position,
+    rotation,
+  };
+}
 
 class SceneViewer {
   private renderer: THREE.WebGLRenderer;
@@ -55,6 +245,7 @@ class SceneViewer {
   private selectionListener: ((id: string | null) => void) | null = null;
   private usePresetColors = false;
   private currentFolder: string | null = null;
+  private normalizeMetadata = false;
 
   setSelectionListener(listener: ((id: string | null) => void) | null): void {
     this.selectionListener = listener;
@@ -90,7 +281,11 @@ class SceneViewer {
     Object.assign(entry, patch);
   }
 
-  constructor(canvasId: string) {
+  constructor(
+    canvasId: string,
+    options?: { normalizeMetadata?: boolean },
+  ) {
+    this.normalizeMetadata = options?.normalizeMetadata ?? false;
     this.canvas = document.getElementById(canvasId) as HTMLCanvasElement;
 
     this.renderer = new THREE.WebGLRenderer({
@@ -277,15 +472,26 @@ class SceneViewer {
       throw new Error(`Failed to load metadata.json from ${folder}`);
     }
 
-    const raw = (await response.json()) as MetadataEntry[] | MetadataDocument;
-    const entries = Array.isArray(raw) ? raw : raw.objects;
+    const raw = (await response.json()) as RawMetadata;
+    let entries: MetadataEntry[];
+    let document: MetadataDocument | null;
 
-    if (!Array.isArray(entries)) {
-      throw new Error("Unsupported metadata.json structure");
+    if (this.normalizeMetadata) {
+      const normalized = normalizeMetadata(raw);
+      entries = normalized.entries;
+      document = normalized.document;
+    } else {
+      const legacy = raw as MetadataEntry[] | MetadataDocument;
+      const extracted = Array.isArray(legacy) ? legacy : legacy.objects;
+      if (!Array.isArray(extracted)) {
+        throw new Error("Unsupported metadata.json structure");
+      }
+      entries = extracted;
+      document = Array.isArray(legacy) ? null : legacy;
     }
 
     this.metadataEntries = entries;
-    this.metadataDocument = Array.isArray(raw) ? null : raw;
+    this.metadataDocument = document;
 
     this.showLoading(true, `Loading ${entries.length} objects...`);
     let loaded = 0;
@@ -339,7 +545,24 @@ class SceneViewer {
     this.scene.add(root);
     this.loadedRoots.set(entry.id, root);
     this.loadedMeshes.set(entry.id, meshes);
+    if (this.normalizeMetadata) {
+      this.applyEntryTransform(root, entry);
+    }
     this.refreshSelectionState(entry.id);
+  }
+
+  private applyEntryTransform(
+    root: THREE.Object3D,
+    entry: MetadataEntry,
+  ): void {
+    const position = entry.position ?? DEFAULT_POSITION;
+    const rotation = entry.rotation
+      ? normalizeQuat(entry.rotation, DEFAULT_ROTATION)
+      : DEFAULT_ROTATION;
+
+    root.position.set(position.x, position.y, position.z);
+    root.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    root.updateMatrixWorld(true);
   }
 
   private cloneMaterial(
@@ -631,7 +854,12 @@ class UIController {
   private activeId: string | null = null;
 
   constructor() {
-    this.viewer = new SceneViewer("render-canvas");
+    const path = window.location.pathname.replace(/\/+$/, "");
+    const normalizeMetadata =
+      path === "/scene-viewer" || path === "/scene-viewer.html";
+    this.viewer = new SceneViewer("render-canvas", {
+      normalizeMetadata,
+    });
 
     this.folderSelect = document.getElementById(
       "folder-select",

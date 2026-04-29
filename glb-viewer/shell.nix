@@ -4,6 +4,7 @@
 pkgs.mkShell {
   buildInputs = with pkgs; [
     nodejs
+    bun
     stdenv.cc.cc.lib
   ];
   shellHook = ''

@@ -13,7 +13,8 @@
   "scripts": {
     "start": "bun run index.ts",
     "dev": "bun --hot run index.ts",
-    "compress:draco": "bun cli/compress-draco.ts"
+    "compress:draco": "bun cli/compress-draco.ts",
+    "metadata:from-glb": "bun scripts/metadata-from-glb.ts"
   },
   "type": "module",
   "dependencies": {
