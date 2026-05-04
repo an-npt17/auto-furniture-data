@@ -3,11 +3,16 @@
 import path from 'node:path';
 import { readdir, mkdir, stat } from 'node:fs/promises';
 
-type TextureOptions = {
-  uastcLevel: number;
-  rdo: boolean;
-  rdoLambda: number;
-  zstd: number;
+type DracoOptions = {
+  method: 'edgebreaker' | 'sequential';
+  quantizationVolume: 'mesh' | 'scene';
+  quantizeColor: number;
+  quantizeGeneric: number;
+  quantizeNormal: number;
+  quantizePosition: number;
+  quantizeTexcoord: number;
+  encodeSpeed: number;
+  decodeSpeed: number;
 };
 
 function parseIntegerFlag(value: string | undefined, fallback: number, name: string): number {
@@ -74,10 +79,15 @@ function printUsage(): void {
     'Usage: bun cli/compress-draco.ts <input-folder> [output-folder] [options]',
     '',
     'Options:',
-    '  --uastc-level <n>                UASTC level, 0-4 (default: 2)',
-    '  --rdo                            Enable UASTC RDO (default: false)',
-    '  --rdo-lambda <n>                 UASTC RDO lambda, 0.001-10 (default: 1)',
-    '  --zstd <n>                       Zstd level, 0-22 (default: 18)',
+    '  --method <name>                  Draco method: edgebreaker|sequential (default: edgebreaker)',
+    '  --quantization-volume <name>      mesh|scene (default: mesh)',
+    '  --quantize-position <n>           POSITION bits, 1-16 (default: 10)',
+    '  --quantize-normal <n>             NORMAL bits, 1-16 (default: 8)',
+    '  --quantize-texcoord <n>           TEXCOORD bits, 1-16 (default: 10)',
+    '  --quantize-color <n>              COLOR bits, 1-16 (default: 8)',
+    '  --quantize-generic <n>            Generic attribute bits, 1-16 (default: 8)',
+    '  --encode-speed <n>                Encoding speed, 0-10 (default: 0)',
+    '  --decode-speed <n>                Decoding speed, 0-10 (default: 0)',
     '  -h, --help                       Show this help message',
   ].join('\n'));
 }
@@ -98,15 +108,54 @@ const outputDirRelative = path.relative(inputDir, outputDir);
 const outputDirInsideInput = outputDirRelative !== '' && !outputDirRelative.startsWith('..') && !path.isAbsolute(outputDirRelative);
 
 const MODEL_EXTENSIONS = new Set(['.glb', '.gltf']);
-const textureOptions: TextureOptions = {
-  uastcLevel: parseIntegerFlag(typeof flags.get('--uastc-level') === 'string' ? flags.get('--uastc-level') : undefined, 2, '--uastc-level'),
-  rdo: flags.get('--rdo') === true,
-  rdoLambda: typeof flags.get('--rdo-lambda') === 'string'
-    ? Number(flags.get('--rdo-lambda'))
-    : 1,
-  zstd: typeof flags.get('--zstd') === 'string'
-    ? parseIntegerFlag(flags.get('--zstd') as string, 18, '--zstd')
-    : 18,
+const dracoOptions: DracoOptions = {
+  method: parseChoiceFlag(
+    typeof flags.get('--method') === 'string' ? flags.get('--method') : undefined,
+    'edgebreaker',
+    '--method',
+    ['edgebreaker', 'sequential'],
+  ),
+  quantizationVolume: parseChoiceFlag(
+    typeof flags.get('--quantization-volume') === 'string' ? flags.get('--quantization-volume') : undefined,
+    'mesh',
+    '--quantization-volume',
+    ['mesh', 'scene'],
+  ),
+  quantizeColor: parseIntegerFlag(
+    typeof flags.get('--quantize-color') === 'string' ? flags.get('--quantize-color') : undefined,
+    8,
+    '--quantize-color',
+  ),
+  quantizeGeneric: parseIntegerFlag(
+    typeof flags.get('--quantize-generic') === 'string' ? flags.get('--quantize-generic') : undefined,
+    8,
+    '--quantize-generic',
+  ),
+  quantizeNormal: parseIntegerFlag(
+    typeof flags.get('--quantize-normal') === 'string' ? flags.get('--quantize-normal') : undefined,
+    8,
+    '--quantize-normal',
+  ),
+  quantizePosition: parseIntegerFlag(
+    typeof flags.get('--quantize-position') === 'string' ? flags.get('--quantize-position') : undefined,
+    10,
+    '--quantize-position',
+  ),
+  quantizeTexcoord: parseIntegerFlag(
+    typeof flags.get('--quantize-texcoord') === 'string' ? flags.get('--quantize-texcoord') : undefined,
+    10,
+    '--quantize-texcoord',
+  ),
+  encodeSpeed: parseIntegerFlag(
+    typeof flags.get('--encode-speed') === 'string' ? flags.get('--encode-speed') : undefined,
+    0,
+    '--encode-speed',
+  ),
+  decodeSpeed: parseIntegerFlag(
+    typeof flags.get('--decode-speed') === 'string' ? flags.get('--decode-speed') : undefined,
+    0,
+    '--decode-speed',
+  ),
 };
 
 async function listModels(dir: string): Promise<string[]> {
@@ -138,13 +187,10 @@ async function listModels(dir: string): Promise<string[]> {
 async function compressFile(inputPath: string, outputPath: string): Promise<void> {
   await mkdir(path.dirname(outputPath), { recursive: true });
 
-  const rdoArgs = textureOptions.rdo
-    ? ['--rdo', '--rdo-lambda', String(textureOptions.rdoLambda)]
-    : [];
-  const command = Bun.$`bunx @gltf-transform/cli uastc ${inputPath} ${outputPath} --level ${textureOptions.uastcLevel} --zstd ${textureOptions.zstd} ${rdoArgs}`;
+  const command = Bun.$`bunx @gltf-transform/cli draco ${inputPath} ${outputPath} --method ${dracoOptions.method} --quantization-volume ${dracoOptions.quantizationVolume} --quantize-color ${dracoOptions.quantizeColor} --quantize-generic ${dracoOptions.quantizeGeneric} --quantize-normal ${dracoOptions.quantizeNormal} --quantize-position ${dracoOptions.quantizePosition} --quantize-texcoord ${dracoOptions.quantizeTexcoord} --encode-speed ${dracoOptions.encodeSpeed} --decode-speed ${dracoOptions.decodeSpeed}`;
   const result = await command;
   if (result.exitCode !== 0) {
-    throw new Error(`gltf-transform uastc failed for ${inputPath}`);
+    throw new Error(`gltf-transform draco failed for ${inputPath}`);
   }
 }
 
