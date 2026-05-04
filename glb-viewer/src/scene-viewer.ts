@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -236,16 +235,27 @@ class SceneViewer {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
-  private controls: OrbitControls;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
   private clock = new THREE.Clock();
+  private pressedKeys = new Set<string>();
+  private activePointerId: number | null = null;
+  private pointerDown = new THREE.Vector2();
+  private pointerLast = new THREE.Vector2();
+  private isDraggingView = false;
+  private cameraYaw = 0;
+  private cameraPitch = 0;
+  private readonly cameraForward = new THREE.Vector3();
+  private readonly cameraRight = new THREE.Vector3();
+  private readonly moveVector = new THREE.Vector3();
+  private readonly lookTarget = new THREE.Vector3();
   private gltfLoader: GLTFLoader;
   private canvas: HTMLCanvasElement;
   private loadedMeshes: Map<string, THREE.Mesh[]> = new Map();
   private loadedRoots: Map<string, THREE.Object3D> = new Map();
   private metadataEntries: MetadataEntry[] = [];
   private metadataDocument: MetadataDocument | null = null;
+  private rawMetadataEntriesById: Map<string, RawMetadataEntry> = new Map();
   private selectedId: string | null = null;
   private selectionListener: ((id: string | null) => void) | null = null;
   private usePresetColors = false;
@@ -270,6 +280,47 @@ class SceneViewer {
 
   getMetadataDocument(): MetadataDocument | null {
     return this.metadataDocument;
+  }
+
+  getSerializableMetadata(): RawMetadata | MetadataEntry[] {
+    const objects = this.metadataEntries.map((entry, index) => {
+      const rawEntry = this.rawMetadataEntriesById.get(entry.id) ?? null;
+      if (!rawEntry) {
+        return {
+          id: entry.id,
+          name: entry.name,
+          category: entry.category,
+          objectRole: entry.objectRole,
+          price: entry.price,
+          shape: entry.shape,
+          size: entry.size,
+          placementType: entry.placementType,
+          color: entry.color,
+          modelUrl: entry.modelUrl,
+          position: entry.position,
+          rotation: entry.rotation,
+        };
+      }
+
+      return {
+        ...rawEntry,
+        id: entry.id,
+        name: entry.name,
+        category: entry.category,
+        objectRole: entry.objectRole,
+        price: entry.price,
+        placementType: entry.placementType,
+      };
+    });
+
+    if (!this.metadataDocument) {
+      return objects;
+    }
+
+    return {
+      ...this.metadataDocument,
+      objects,
+    };
   }
 
   getEntry(id: string): MetadataEntry | undefined {
@@ -316,19 +367,8 @@ class SceneViewer {
       5000,
     );
     this.camera.position.set(0, 2, -8);
-
-    this.controls = new OrbitControls(this.camera, this.canvas);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
-    this.controls.enablePan = true;
-    this.controls.enableRotate = true;
-    this.controls.enableZoom = true;
-    this.controls.zoomSpeed = 1.2;
-    this.controls.rotateSpeed = 0.7;
-    this.controls.panSpeed = 0.8;
-    this.controls.minDistance = 0.2;
-    this.controls.maxDistance = 2000;
-    this.controls.target.set(0, 1, 0);
+    this.camera.rotation.order = "YXZ";
+    this.setCameraLookAt(this.lookTarget.set(0, 1, 0));
 
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath(
@@ -390,9 +430,16 @@ class SceneViewer {
   }
 
   private setupInteractions(): void {
-    this.canvas.addEventListener("click", this.handleCanvasClick);
+    this.canvas.style.touchAction = "none";
+    this.canvas.style.cursor = "grab";
     this.canvas.addEventListener("wheel", this.handleWheel, { passive: false });
     this.canvas.addEventListener("pointerdown", this.handlePointerDown);
+    this.canvas.addEventListener("pointermove", this.handlePointerMove);
+    this.canvas.addEventListener("pointerup", this.handlePointerUp);
+    this.canvas.addEventListener("pointercancel", this.handlePointerCancel);
+    window.addEventListener("keydown", this.handleKeyDown);
+    window.addEventListener("keyup", this.handleKeyUp);
+    window.addEventListener("blur", this.handleWindowBlur);
   }
 
   private handleResize = (): void => {
@@ -406,31 +453,180 @@ class SceneViewer {
     );
   };
 
-  private handleCanvasClick = (event: MouseEvent): void => {
+  private handlePointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0) return;
+
+    this.activePointerId = event.pointerId;
+    this.isDraggingView = false;
+    this.pointerDown.set(event.clientX, event.clientY);
+    this.pointerLast.copy(this.pointerDown);
     this.updatePointer(event.clientX, event.clientY);
-    this.selectFromPointer();
+    this.canvas.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    this.canvas.style.cursor = "grabbing";
   };
 
-  private handlePointerDown = (event: PointerEvent): void => {
+  private handlePointerMove = (event: PointerEvent): void => {
     this.updatePointer(event.clientX, event.clientY);
+
+    if (this.activePointerId !== event.pointerId) return;
+
+    const dx = event.clientX - this.pointerLast.x;
+    const dy = event.clientY - this.pointerLast.y;
+    this.pointerLast.set(event.clientX, event.clientY);
+
+    if (!this.isDraggingView) {
+      const distance = this.pointerDown.distanceTo(this.pointerLast);
+      if (distance < 4) return;
+      this.isDraggingView = true;
+    }
+
+    this.cameraYaw -= dx * 0.005;
+    this.cameraPitch = THREE.MathUtils.clamp(
+      this.cameraPitch - dy * 0.005,
+      -Math.PI / 2 + 0.05,
+      Math.PI / 2 - 0.05,
+    );
+    this.syncCameraRotation();
+  };
+
+  private handlePointerUp = (event: PointerEvent): void => {
+    if (this.activePointerId !== event.pointerId) return;
+
+    this.updatePointer(event.clientX, event.clientY);
+
+    if (!this.isDraggingView) {
+      this.selectFromPointer();
+    }
+
+    this.releaseActivePointer(event.pointerId);
+  };
+
+  private handlePointerCancel = (event: PointerEvent): void => {
+    if (this.activePointerId !== event.pointerId) return;
+    this.releaseActivePointer(event.pointerId);
   };
 
   private handleWheel = (event: WheelEvent): void => {
     event.preventDefault();
-    const zoomFactor = Math.exp(event.deltaY * 0.0015);
-    this.camera.fov = THREE.MathUtils.clamp(
-      this.camera.fov * zoomFactor,
-      15,
-      90,
-    );
-    this.camera.updateProjectionMatrix();
+    this.getCameraForward(this.cameraForward);
+    this.camera.position.addScaledVector(this.cameraForward, event.deltaY * 0.01);
   };
+
+  private handleKeyDown = (event: KeyboardEvent): void => {
+    const key = event.key.toLowerCase();
+    if (!this.isMovementKey(key)) return;
+    if (this.isEditableTarget(event.target)) return;
+
+    event.preventDefault();
+    this.pressedKeys.add(key);
+  };
+
+  private handleKeyUp = (event: KeyboardEvent): void => {
+    const key = event.key.toLowerCase();
+    if (!this.isMovementKey(key)) return;
+    if (this.isEditableTarget(event.target)) return;
+
+    event.preventDefault();
+    this.pressedKeys.delete(key);
+  };
+
+  private handleWindowBlur = (): void => {
+    this.pressedKeys.clear();
+    this.releaseActivePointer(this.activePointerId);
+  };
+
+  private releaseActivePointer(pointerId: number | null): void {
+    if (pointerId !== null && this.canvas.hasPointerCapture(pointerId)) {
+      this.canvas.releasePointerCapture(pointerId);
+    }
+
+    this.activePointerId = null;
+    this.isDraggingView = false;
+    this.canvas.style.cursor = "grab";
+  }
 
   private animate = (): void => {
     const delta = Math.min(this.clock.getDelta(), 0.05);
-    this.controls.update();
+    this.updateCameraMovement(delta);
     this.renderer.render(this.scene, this.camera);
   };
+
+  private updateCameraMovement(delta: number): void {
+    const speed = (this.pressedKeys.has("shift") ? 10 : 5) * delta;
+    const forward = (this.pressedKeys.has("w") || this.pressedKeys.has("arrowup")) ? 1 : 0;
+    const backward = (this.pressedKeys.has("s") || this.pressedKeys.has("arrowdown")) ? 1 : 0;
+    const left = (this.pressedKeys.has("a") || this.pressedKeys.has("arrowleft")) ? 1 : 0;
+    const right = (this.pressedKeys.has("d") || this.pressedKeys.has("arrowright")) ? 1 : 0;
+
+    this.getWalkForward(this.cameraForward);
+    this.getWalkRight(this.cameraRight);
+
+    this.moveVector.set(0, 0, 0);
+    this.moveVector.addScaledVector(this.cameraForward, forward - backward);
+    this.moveVector.addScaledVector(this.cameraRight, right - left);
+
+    if (this.moveVector.lengthSq() > 0) {
+      this.moveVector.normalize().multiplyScalar(speed);
+      this.camera.position.add(this.moveVector);
+    }
+  }
+
+  private isMovementKey(key: string): boolean {
+    return (
+      key === "w" ||
+      key === "a" ||
+      key === "s" ||
+      key === "d" ||
+      key === "arrowup" ||
+      key === "arrowdown" ||
+      key === "arrowleft" ||
+      key === "arrowright" ||
+      key === "shift"
+    );
+  }
+
+  private isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return (
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT" ||
+      target.isContentEditable
+    );
+  }
+
+  private getWalkForward(target: THREE.Vector3): THREE.Vector3 {
+    target.set(Math.sin(this.cameraYaw), 0, -Math.cos(this.cameraYaw));
+    return target;
+  }
+
+  private getWalkRight(target: THREE.Vector3): THREE.Vector3 {
+    target.set(Math.cos(this.cameraYaw), 0, Math.sin(this.cameraYaw));
+    return target;
+  }
+
+  private getCameraForward(target: THREE.Vector3): THREE.Vector3 {
+    return target.set(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+  }
+
+  private setCameraLookAt(target: THREE.Vector3): void {
+    const direction = target.clone().sub(this.camera.position).normalize();
+    this.cameraPitch = Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1));
+    this.cameraYaw = Math.atan2(direction.x, -direction.z);
+    this.syncCameraRotation();
+  }
+
+  private syncCameraRotation(): void {
+    this.camera.rotation.set(this.cameraPitch, this.cameraYaw, 0, "YXZ");
+  }
+
+  private getCameraLookTarget(target: THREE.Vector3): THREE.Vector3 {
+    return target
+      .set(0, 0, -1)
+      .applyEuler(this.camera.rotation)
+      .add(this.camera.position);
+  }
 
   private updatePointer(clientX: number, clientY: number): void {
     const rect = this.canvas.getBoundingClientRect();
@@ -475,6 +671,15 @@ class SceneViewer {
     }
 
     const raw = (await response.json()) as RawMetadata;
+    const rawEntries = Array.isArray(raw) ? raw : raw.objects;
+    this.rawMetadataEntriesById.clear();
+    if (Array.isArray(rawEntries)) {
+      rawEntries.forEach((entry, index) => {
+        const id = readString(entry.id, "").trim() || `object-${index + 1}`;
+        this.rawMetadataEntriesById.set(id, entry);
+      });
+    }
+
     let entries: MetadataEntry[];
     let document: MetadataDocument | null;
 
@@ -737,6 +942,7 @@ class SceneViewer {
     this.loadedRoots.clear();
     this.metadataEntries = [];
     this.metadataDocument = null;
+    this.rawMetadataEntriesById.clear();
     this.selectedId = null;
     this.currentFolder = null;
     this.selectionListener?.(null);
@@ -763,8 +969,7 @@ class SceneViewer {
   private focusCamera(): void {
     if (this.loadedRoots.size === 0) {
       this.camera.position.set(0, 2, -8);
-      this.controls.target.set(0, 0, 0);
-      this.controls.update();
+      this.setCameraLookAt(this.lookTarget.set(0, 1, 0));
       return;
     }
 
@@ -780,22 +985,21 @@ class SceneViewer {
 
     if (box.isEmpty()) {
       this.camera.position.set(0, 2, -8);
-      this.controls.target.set(0, 0, 0);
-      this.controls.update();
+      this.setCameraLookAt(this.lookTarget.set(0, 1, 0));
       return;
     }
 
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const radius = Math.max(size.length() * 0.5, 1);
+    const currentLookTarget = this.getCameraLookTarget(this.lookTarget);
 
     this.camera.position.set(
       center.x,
       center.y + Math.max(radius * 0.35, 2),
       center.z - Math.max(radius * 1.8, 8),
     );
-    this.controls.target.copy(center);
-    this.controls.update();
+    this.setCameraLookAt(currentLookTarget);
   }
 
   private showLoading(show: boolean, text = "Loading..."): void {
@@ -1032,13 +1236,7 @@ class UIController {
     });
 
     try {
-      const data = this.viewer.getMetadataEntries();
-      const payload = this.viewer.getMetadataDocument()
-        ? {
-            ...(this.viewer.getMetadataDocument() as MetadataDocument),
-            objects: data,
-          }
-        : data;
+      const payload = this.viewer.getSerializableMetadata();
 
       const response = await fetch("/api/save-metadata", {
         method: "POST",

@@ -44,31 +44,44 @@ const server = serve({
 
     // API: save metadata.json for a data folder
     if (url.pathname === "/api/save-metadata" && req.method === "POST") {
-      const body = await req.json() as { folder: string; data: unknown };
+      const body = (await req.json()) as { folder: string; data: unknown };
       const folder = body.folder;
       const data = body.data;
       if (!folder || !data) {
-        return new Response(JSON.stringify({ error: "Missing folder or data" }), { status: 400 });
+        return new Response(
+          JSON.stringify({ error: "Missing folder or data" }),
+          { status: 400 },
+        );
       }
       const normalizedData = Array.isArray(data)
         ? data
-        : typeof data === "object" && data !== null && Array.isArray((data as { objects?: unknown }).objects)
-        ? data
-        : null;
+        : typeof data === "object" &&
+            data !== null &&
+            Array.isArray((data as { objects?: unknown }).objects)
+          ? data
+          : null;
 
       if (!normalizedData) {
-        return new Response(JSON.stringify({ error: "Invalid metadata payload" }), { status: 400 });
+        return new Response(
+          JSON.stringify({ error: "Invalid metadata payload" }),
+          { status: 400 },
+        );
       }
 
       const allowedFolders = new Set(await listDataFolders());
       if (!allowedFolders.has(folder)) {
-        return new Response(JSON.stringify({ error: "Unknown folder" }), { status: 400 });
+        return new Response(JSON.stringify({ error: "Unknown folder" }), {
+          status: 400,
+        });
       }
 
       const metaPath = join(folder, "metadata.json");
       const metaFile = Bun.file(metaPath);
       if (!(await metaFile.exists())) {
-        return new Response(JSON.stringify({ error: "metadata.json not found in folder" }), { status: 404 });
+        return new Response(
+          JSON.stringify({ error: "metadata.json not found in folder" }),
+          { status: 404 },
+        );
       }
       await Bun.write(metaPath, JSON.stringify(normalizedData, null, 2));
       return new Response(JSON.stringify({ ok: true }), {
@@ -103,14 +116,16 @@ const server = serve({
 
     // Serve files from data folders (e.g. /data/ngu/metadata.json or /data/ngu/SomeModel.glb)
     if (url.pathname.startsWith("/data/")) {
-      const relativePath = decodeURIComponent(url.pathname.slice("/data/".length));
+      const relativePath = decodeURIComponent(
+        url.pathname.slice("/data/".length),
+      );
       const file = Bun.file(relativePath);
       if (await file.exists()) {
         const contentType = url.pathname.endsWith(".json")
           ? "application/json"
           : url.pathname.endsWith(".glb")
-          ? "model/gltf-binary"
-          : "application/octet-stream";
+            ? "model/gltf-binary"
+            : "application/octet-stream";
         return new Response(file, {
           headers: { "Content-Type": contentType },
         });
@@ -124,8 +139,8 @@ const server = serve({
         const contentType = url.pathname.endsWith(".json")
           ? "application/json"
           : url.pathname.endsWith(".glb")
-          ? "model/gltf-binary"
-          : "application/octet-stream";
+            ? "model/gltf-binary"
+            : "application/octet-stream";
         return new Response(file, {
           headers: { "Content-Type": contentType },
         });
@@ -144,5 +159,6 @@ const server = serve({
   },
 });
 
-console.log(`GLB Viewer running at http://localhost:${server.port}`);
-console.log(`Scene viewer: http://localhost:${server.port}/`);
+console.log(
+  `Scene viewer and editor: http://localhost:${server.port}/scene-viewer`,
+);
