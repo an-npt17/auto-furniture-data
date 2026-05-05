@@ -181,6 +181,127 @@ function categoryToVi(cat: string): string {
   return "Phòng ngủ";
 }
 
+// ─── GLB bounds reader ───────────────────────────────────────────────────────
+/**
+ * Reads the POSITION accessor min/max from a GLB file.
+ * Returns local-space AABB: { min: [x,y,z], max: [x,y,z] }
+ * Falls back to null if the file can't be parsed.
+ */
+function readGlbBounds(
+  glbPath: string,
+): { min: [number, number, number]; max: [number, number, number] } | null {
+  try {
+    const buf = fs.readFileSync(glbPath);
+    // GLB header: magic(4) version(4) length(4)
+    // Chunk 0: chunkLength(4) chunkType(4=0x4E4F534A=JSON) chunkData
+    const chunkLength = buf.readUInt32LE(12);
+    const jsonStr = buf.toString("utf8", 20, 20 + chunkLength);
+    const gltf = JSON.parse(jsonStr);
+
+    // Find the POSITION accessor (first primitive of first mesh)
+    const mesh = gltf.meshes?.[0];
+    const posIdx = mesh?.primitives?.[0]?.attributes?.POSITION;
+    if (posIdx == null) return null;
+
+    const acc = gltf.accessors[posIdx];
+    if (!acc?.min || !acc?.max) return null;
+
+    return {
+      min: acc.min as [number, number, number],
+      max: acc.max as [number, number, number],
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Quaternion helpers ──────────────────────────────────────────────────────
+/** Rotate a [x, y, z] vector by a unit quaternion {x,y,z,w} */
+function rotateVec3(
+  v: [number, number, number],
+  q: { x: number; y: number; z: number; w: number },
+): [number, number, number] {
+  // Hamilton product: q * v * q^-1
+  const { x: qx, y: qy, z: qz, w: qw } = q;
+  const [vx, vy, vz] = v;
+  // t = 2 * cross(q.xyz, v)
+  const tx = 2 * (qy * vz - qz * vy);
+  const ty = 2 * (qz * vx - qx * vz);
+  const tz = 2 * (qx * vy - qy * vx);
+  return [
+    vx + qw * tx + qy * tz - qz * ty,
+    vy + qw * ty + qz * tx - qx * tz,
+    vz + qw * tz + qx * ty - qy * tx,
+  ];
+}
+
+function wallFromMesh(
+  obj: InputObject,
+  scale: number,
+  modelsDir?: string,
+): InputWall | null {
+  if (!obj.position || !modelsDir) return null;
+
+  const glbPath = path.join(modelsDir, path.basename(obj.modelUrl));
+  const bounds = readGlbBounds(glbPath);
+  if (!bounds) return null;
+
+  const { min: mn, max: mx } = bounds;
+  const { x: px, z: pz } = obj.position;
+  const rot = obj.rotation ?? { x: 0, y: 0, z: 0, w: 1 };
+
+  const angle = 2 * Math.atan2(rot.y, rot.w);
+
+  function rotateXZ(x: number, z: number): [number, number] {
+    return [
+      x * Math.cos(angle) - z * Math.sin(angle),
+      x * Math.sin(angle) + z * Math.cos(angle),
+    ];
+  }
+
+  // Rotate all 4 floor corners (localX, localY) → world offset from pivot
+  const corners = [
+    rotateXZ(mn[0], mn[1]),
+    rotateXZ(mx[0], mn[1]),
+    rotateXZ(mn[0], mx[1]),
+    rotateXZ(mx[0], mx[1]),
+  ];
+
+  const worldXs = corners.map((c) => px + c[0]);
+  const worldZs = corners.map((c) => pz + c[1]);
+
+  const minX = Math.min(...worldXs);
+  const maxX = Math.max(...worldXs);
+  const minZ = Math.min(...worldZs);
+  const maxZ = Math.max(...worldZs);
+  const spanX = maxX - minX;
+  const spanZ = maxZ - minZ;
+  const alongX = spanX >= spanZ;
+
+  // startPoint/endPoint = centerline along the long axis
+  const startPoint: [number, number] = alongX
+    ? [minX, (minZ + maxZ) / 2]
+    : [(minX + maxX) / 2, minZ];
+
+  const endPoint: [number, number] = alongX
+    ? [maxX, (minZ + maxZ) / 2]
+    : [(minX + maxX) / 2, maxZ];
+
+  return {
+    id: obj.id,
+    startPoint,
+    endPoint,
+    thickness: mm2m(alongX ? spanZ : spanX, scale),
+    height: mm2m(obj.size[1], scale),
+    color: obj.color,
+  };
+}
+
+function isWallMesh(obj: InputObject): boolean {
+  // Only full-height perimeter walls should become room walls.
+  return obj.name === "Tường" || obj.name.startsWith("Tường");
+}
+
 // ─── Core converter ──────────────────────────────────────────────────────────
 
 function convert(
@@ -193,14 +314,22 @@ function convert(
 } {
   const scale = config.scale ?? 1000;
   const { modelPrefix, roomName } = config;
-  const { walls } = input;
+  const walls = [
+    ...input.walls,
+    ...input.objects
+      .filter(isWallMesh)
+      .map((obj) => wallFromMesh(obj, scale, config.modelsDir)) // <-- add modelsDir
+      .filter((wall): wall is InputWall => wall !== null),
+  ];
 
   // ── Filter objects by available model files ────────────────────
   const available = loadAvailableModels(config.modelsDir);
   const skipped: string[] = [];
 
+  const visibleObjects = input.objects.filter((obj) => !isWallMesh(obj));
+
   const objects = available
-    ? input.objects.filter((obj) => {
+    ? visibleObjects.filter((obj) => {
         const filename = getFilename(obj.modelUrl);
         if (available.has(filename)) return true;
         skipped.push(
@@ -208,7 +337,7 @@ function convert(
         );
         return false;
       })
-    : input.objects;
+    : visibleObjects;
 
   if (skipped.length) {
     console.log("\nFiltered out (model file missing):");
@@ -252,16 +381,24 @@ function convert(
   });
 
   // ── roomTemplate.json ─────────────────────────────────────────
-  // Normalise positions so the room origin starts near [0, 0, 0]
-  const xs = objects.map((o) => o.position?.x ?? 0);
-  const zs = objects.map((o) => o.position?.z ?? 0);
-  const originX = xs.length ? Math.min(...xs) : 0;
-  const originZ = zs.length ? Math.min(...zs) : 0;
+  // Center the room around the mean object position in X/Z.
+  const centerX = objects.length
+    ? objects.reduce((sum, o) => sum + (o.position?.x ?? 0), 0) / objects.length
+    : 0;
+  const centerZ = objects.length
+    ? objects.reduce((sum, o) => sum + (o.position?.z ?? 0), 0) / objects.length
+    : 0;
 
   const templateWalls: TemplateWall[] = walls.map((w) => ({
     id: w.id,
-    startPoint: [mm2m(w.startPoint[0], scale), mm2m(w.startPoint[1], scale)],
-    endPoint: [mm2m(w.endPoint[0], scale), mm2m(w.endPoint[1], scale)],
+    startPoint: [
+      mm2m(w.startPoint[0] - centerX, scale),
+      mm2m(w.startPoint[1] - centerZ, scale),
+    ],
+    endPoint: [
+      mm2m(w.endPoint[0] - centerX, scale),
+      mm2m(w.endPoint[1] - centerZ, scale),
+    ],
     thickness: w.thickness,
     height: w.height,
     color: w.color,
@@ -271,9 +408,9 @@ function convert(
     const filename = getFilename(obj.modelUrl);
     const pos = obj.position
       ? ([
-          mm2m(obj.position.x - originX, scale),
+          mm2m(obj.position.x - centerX, scale),
           mm2m(obj.position.y, scale),
-          mm2m(obj.position.z - originZ, scale),
+          mm2m(obj.position.z - centerZ, scale),
         ] as [number, number, number])
       : ([0, 0, 0] as [number, number, number]);
 
