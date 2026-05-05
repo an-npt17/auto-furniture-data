@@ -1,5 +1,5 @@
 macroScript CoronaToPhysical
-	category:"Vella" 
+	category:"A-Star" 
 	internalcategory:"Automate"
 	tooltip:"Automate CoronaToPhysical"
 	buttonText:"CoronaMtl to PhysicalMtl"
