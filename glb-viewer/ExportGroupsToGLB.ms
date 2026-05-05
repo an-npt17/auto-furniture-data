@@ -1,29 +1,4 @@
-/*
-
-  CoronaVrayToGLB
-  Author  : A-Star Group
-  Website : https://a-star.group/
-  Software: 3D Studio Max 2024+
-  Engine  : V-Ray 6+, Corona 11+
-  Language: MAXScript
-
-  Version History
-  ---------------
-
-  v01  2025/04/24  All coordinates pre-converted to Three.js space at export time
-                   No conversion needed in Three.js at runtime
-                   Polygon/wall points: Max(x,y) -> Three.js(x,-y)
-                     Max Y (forward) maps to Three.js -Z (stored as second component)
-                   Object position:    Max(x,y,z) -> Three.js(x,z,-y)
-                     Max Z (up) maps to Three.js Y
-                     Max Y (forward) maps to Three.js -Z
-                   Object size:        Max(x,y,z) -> Three.js(x,z,y)
-                     Swap Y and Z so size axes match Three.js orientation
-                   Object rotation: unchanged (already Three.js quaternion since v05)
-
-*/
-
-macroscript CoronaVrayToGLB
+macroScript CoronaVrayToGLB
 category:"A-Star"
 tooltip:"Automate CoronaVrayToGLB"
 buttonText:"Vray Corona To GLB"
@@ -34,7 +9,7 @@ Icon:"MassFX\CreateHingeConstraint"
   -- Global Variables
   --------------------------------------------------------------------------
 
-  scriptVersion          = "1.0"
+  scriptVersion          = "1.1"
   renderEngine           = ""
   testMode               = false
   findTextures           = false
@@ -112,7 +87,7 @@ Icon:"MassFX\CreateHingeConstraint"
       local mat = n.material
       if classOf mat == Multimaterial and mat.numsubs > 0 do mat = mat[1]
       if (matchPattern (classOf mat as string) pattern:"CoronaPhysicalMtl*") do return (ColorToHex mat.baseColor)
-      if (matchPattern (classOf mat as string) pattern:"VRayMtl*")           do return (ColorToHex mat.Diffuse)
+      if (matchPattern (classOf mat as string) pattern:"VRayMtl*")            do return (ColorToHex mat.Diffuse)
       if (matchPattern (classOf mat as string) pattern:"glTFMaterial*")      do return (ColorToHex mat.baseColor)
       if classOf mat == StandardMaterial  do return (ColorToHex mat.diffuse)
       if classOf mat == PhysicalMaterial  do return (ColorToHex mat.base_color)
@@ -136,19 +111,15 @@ Icon:"MassFX\CreateHingeConstraint"
 
   --------------------------------------------------------------------------
   -- Rotation: 3ds Max (Z-up, LH) -> Three.js (Y-up, RH)
-  --
-  -- Step 1  flip handedness LH->RH : negate x,y,z  keep w
-  -- Step 2  remap Z-up->Y-up       : (qx,qy,qz) -> (qx, qz, -qy)
-  -- Combined                       : Max(x,y,z,w) -> Three.js(-x,-z,y,w)
-  -- Then normalize.
   --------------------------------------------------------------------------
 
   fn ConvertRotationToThreeJS q =
   (
-    local rx =  -q.x
-    local ry =  -q.z
-    local rz =   q.y
-    local rw =   q.w
+    -- Correct Quaternion conversion from Max to Three.js
+    local rx =  q.x
+    local ry =  q.z
+    local rz = -q.y
+    local rw =  q.w
     local len = sqrt (rx*rx + ry*ry + rz*rz + rw*rw)
     if len > 0.0 do
     (
@@ -157,22 +128,8 @@ Icon:"MassFX\CreateHingeConstraint"
     quat rx ry rz rw
   )
 
-  fn GetObjectRotationYUp objArray =
-  (
-    if classof objArray != Array then objArray = #(objArray)
-    local q     = quat 0 0 0 1
-    local found = false
-    for obj in objArray while not found do
-      if isGroupHead obj then ( q = obj.rotation; found = true )
-    if not found do
-      for obj in objArray while not found do
-        if isValidNode obj and (superClassOf obj == GeometryClass) then
-          ( q = obj.rotation; found = true )
-    ConvertRotationToThreeJS q
-  )
-
   --------------------------------------------------------------------------
-  -- Bounding box / position helpers
+  -- Bounding box helpers
   --------------------------------------------------------------------------
 
   fn GetBoundingBoxSize objArray =
@@ -196,43 +153,8 @@ Icon:"MassFX\CreateHingeConstraint"
     #( (maxPt.x - minPt.x), (maxPt.y - minPt.y), (maxPt.z - minPt.z) )
   )
 
-  fn GetObjectPosition objArray =
-  (
-    if classof objArray != Array then objArray = #(objArray)
-    if objArray.count == 1 then return objArray[1].pos
-    local found  = false
-    local result = [0,0,0]
-    for obj in objArray while not found do
-      if isGroupHead obj then ( result = obj.pos; found = true )
-    if found then return result
-    local minPt = [ 1e9,  1e9,  1e9]
-    local maxPt = [-1e9, -1e9, -1e9]
-    for obj in objArray do
-    (
-      if isValidNode obj and (superClassOf obj == GeometryClass) then
-      (
-        local bb = nodeGetBoundingBox obj (matrix3 1)
-        if bb[1].x < minPt.x do minPt.x = bb[1].x
-        if bb[1].y < minPt.y do minPt.y = bb[1].y
-        if bb[1].z < minPt.z do minPt.z = bb[1].z
-        if bb[2].x > maxPt.x do maxPt.x = bb[2].x
-        if bb[2].y > maxPt.y do maxPt.y = bb[2].y
-        if bb[2].z > maxPt.z do maxPt.z = bb[2].z
-      )
-    )
-    (minPt + maxPt) / 2.0
-  )
-
   --------------------------------------------------------------------------
   -- Build metadata record for one exported GLB
-  --
-  -- Record layout:
-  --  [1]  id           [2]  name         [3]  category
-  --  [4]  type         [5]  size.x       [6]  size.y
-  --  [7]  size.z       [8]  placementType[9]  color
-  --  [10] modelUrl     [11] position.x   [12] position.y
-  --  [13] position.z   [14] rotation.x   [15] rotation.y
-  --  [16] rotation.z   [17] rotation.w
   --------------------------------------------------------------------------
 
   fn BuildExportMetadataRecord objectNode exportedName sizeArray positionValue rotationValue nodeArray =
@@ -243,16 +165,11 @@ Icon:"MassFX\CreateHingeConstraint"
     local modelUrl = "/models/" + exportedName
 
     -- Convert position from Max space to Three.js space:
-    --   Max(x, y, z)  ->  Three.js(x, z, -y)
-    --   Max Z (up)    ->  Three.js Y
-    --   Max Y (fwd)   ->  Three.js -Z
     local posX =  positionValue.x
     local posY =  positionValue.z   -- Max Z  -> Three.js Y
     local posZ = -positionValue.y   -- Max Y  -> Three.js -Z
 
     -- Convert size axis order from Max space to Three.js space:
-    --   Max(x, y, z)  ->  Three.js(x, z, y)
-    --   width stays X, depth (Max Y) becomes Three.js Z, height (Max Z) becomes Three.js Y
     local sizeX = sizeArray[1]      -- Max X  -> Three.js X  (width,  unchanged)
     local sizeY = sizeArray[3]      -- Max Z  -> Three.js Y  (height)
     local sizeZ = sizeArray[2]      -- Max Y  -> Three.js Z  (depth)
@@ -1087,10 +1004,6 @@ Icon:"MassFX\CreateHingeConstraint"
 
   fn GetSplinePolygon splineObj =
   (
-    -- Converts knot points from 3ds Max space to Three.js space at export time:
-    --   Max X  ->  Three.js X  (unchanged)
-    --   Max Y  ->  Three.js -Z (negated, stored as second component)
-    -- This means Three.js can use polygon[i] as [x, z] directly with no runtime conversion.
     local pts = #()
     if (classOf splineObj == SplineShape) or (classOf splineObj == Line) then
     (
@@ -1098,7 +1011,7 @@ Icon:"MassFX\CreateHingeConstraint"
       for k = 1 to nk do
       (
         local kp = getKnotPoint splineObj 1 k
-        append pts #(kp.x, -kp.y)   -- negate Y: Max forward -> Three.js -Z
+        append pts #(kp.x, -kp.y)
       )
     )
     pts
@@ -1106,21 +1019,14 @@ Icon:"MassFX\CreateHingeConstraint"
 
   --------------------------------------------------------------------------
   -- Room Spline: generate walls from segments
-  --   - Reads per-wall overrides from user-properties on the spline:
-  --       wallThickness  (default 0.2)
-  --       wallHeight     (default 3.0)
-  --       wallColor      (default #cccccc)
-  --   - Closed splines wrap the last segment back to knot 1
   --------------------------------------------------------------------------
 
   fn GetWallsFromSpline splineObj =
   (
-    -- Default values (can be overridden per-object via user properties)
     local defThickness = 0.2
     local defHeight    = 3.0
     local defColor     = "#cccccc"
 
-    -- Read overrides from user properties
     local propThickness = getUserProp splineObj "wallThickness"
     local propHeight    = getUserProp splineObj "wallHeight"
     local propColor     = getUserProp splineObj "wallColor"
@@ -1142,8 +1048,6 @@ Icon:"MassFX\CreateHingeConstraint"
         local p1     = getKnotPoint splineObj 1 k
         local p2     = getKnotPoint splineObj 1 nextK
         local wallId = "wall-" + (k as string)
-        -- Negate Y: Max Y (forward) -> Three.js -Z (stored as second component)
-        -- Three.js reads startPoint/endPoint as [x, z] directly, no runtime conversion needed
         append walls #(wallId, #(p1.x, -p1.y), #(p2.x, -p2.y), thickness, height, color)
       )
     )
@@ -1152,7 +1056,6 @@ Icon:"MassFX\CreateHingeConstraint"
 
   --------------------------------------------------------------------------
   -- Find the room spline in the scene
-  --   Priority: object named "Room"  >  first SplineShape  >  first Line
   --------------------------------------------------------------------------
 
   fn FindRoomSpline =
@@ -1162,7 +1065,7 @@ Icon:"MassFX\CreateHingeConstraint"
     (
       if (classOf obj == SplineShape) or (classOf obj == Line) then
       (
-        if found == undefined do found = obj       -- first spline fallback
+        if found == undefined do found = obj
         if obj.name == "Room" then ( found = obj; exit )
       )
     )
@@ -1171,11 +1074,6 @@ Icon:"MassFX\CreateHingeConstraint"
 
   --------------------------------------------------------------------------
   -- Write metadata.json
-  --   {
-  --     "polygon": [...],   <- 2D room outline from spline
-  --     "walls":   [...],   <- generated from spline segments
-  --     "objects": [...]    <- GLB furniture/objects
-  --   }
   --------------------------------------------------------------------------
 
   fn WriteMetadataJson glbPath splineObj objectMetadata =
@@ -1221,13 +1119,13 @@ Icon:"MassFX\CreateHingeConstraint"
       local ht  = formattedPrint w[5]    format:".4f"
       local cl  = EscapeJsonString (w[6] as string)
 
-      format "    {\n"                                                   to:fStream
-      format "      \"id\": \"%\",\n"               wId                 to:fStream
-      format "      \"startPoint\": [%, %],\n"      sx sy               to:fStream
-      format "      \"endPoint\": [%, %],\n"        ex ey               to:fStream
-      format "      \"thickness\": %,\n"            th                  to:fStream
-      format "      \"height\": %,\n"               ht                  to:fStream
-      format "      \"color\": \"%\"\n"             cl                  to:fStream
+      format "    {\n"                                                 to:fStream
+      format "      \"id\": \"%\",\n"                wId                 to:fStream
+      format "      \"startPoint\": [%, %],\n"       sx sy               to:fStream
+      format "      \"endPoint\": [%, %],\n"         ex ey               to:fStream
+      format "      \"thickness\": %,\n"             th                  to:fStream
+      format "      \"height\": %,\n"                ht                  to:fStream
+      format "      \"color\": \"%\"\n"              cl                  to:fStream
 
       if i < walls.count then format "    },\n" to:fStream
       else                     format "    }\n"  to:fStream
@@ -1257,20 +1155,20 @@ Icon:"MassFX\CreateHingeConstraint"
       local rz  = formattedPrint   e[16] format:".6f"
       local rw  = formattedPrint   e[17] format:".6f"
 
-      format "    {\n"                                                                        to:fStream
-      format "      \"id\": \"%\",\n"                              id                        to:fStream
-      format "      \"name\": \"%\",\n"                            nm                        to:fStream
-      format "      \"category\": \"%\",\n"                        cat                       to:fStream
-      format "      \"type\": \"%\",\n"                           shp                       to:fStream
-      format "      \"size\": [%, %, %],\n"                        ssx ssy ssz               to:fStream
-      format "      \"placementType\": \"%\",\n"                   plt                       to:fStream
-      format "      \"color\": \"%\",\n"                           col                       to:fStream
-      format "      \"modelUrl\": \"%\",\n"                        url                       to:fStream
+      format "    {\n"                                                                       to:fStream
+      format "      \"id\": \"%\",\n"                               id                       to:fStream
+      format "      \"name\": \"%\",\n"                             nm                       to:fStream
+      format "      \"category\": \"%\",\n"                         cat                      to:fStream
+      format "      \"shape\": \"%\",\n"                            shp                      to:fStream
+      format "      \"size\": [%, %, %],\n"                         ssx ssy ssz              to:fStream
+      format "      \"placementType\": \"%\",\n"                    plt                      to:fStream
+      format "      \"color\": \"%\",\n"                            col                      to:fStream
+      format "      \"modelUrl\": \"%\",\n"                         url                      to:fStream
       format "      \"position\": { \"x\": %, \"y\": %, \"z\": % },\n"     px py pz         to:fStream
       format "      \"rotation\": { \"x\": %, \"y\": %, \"z\": %, \"w\": % }\n" rx ry rz rw to:fStream
 
       if i < objectMetadata.count then format "    },\n" to:fStream
-      else                              format "    }\n"  to:fStream
+      else                               format "    }\n"  to:fStream
     )
     format "  ]\n" to:fStream
     format "}\n"   to:fStream
@@ -1295,13 +1193,27 @@ Icon:"MassFX\CreateHingeConstraint"
     (
       local members     = CollectGroupMembers obj
       for m in members do processedNodes[m.inode.handle] = true
+      
+      local origPos = obj.pos
+      local origRot = obj.rotation
+
+      -- Temporarily reset rotation to get unrotated LOCAL bounding box
+      obj.rotation = quat 0 0 0 1
+      local sz = GetBoundingBoxSize members
+      
+      -- Temporarily move pivot to World Origin to avoid double transforms in the exported GLB
+      obj.pos = [0,0,0]
+
       setGroupOpen obj true
       local exportedName = ExportNodesToGLB glbPath obj.name members
       setGroupOpen obj false
-      local pos = GetObjectPosition members
-      local sz  = GetBoundingBoxSize members
-      local rot = GetObjectRotationYUp members
-      append metadata (BuildExportMetadataRecord obj exportedName sz pos rot members)
+      
+      -- Restore true transform back into the 3ds Max Scene
+      obj.pos = origPos
+      obj.rotation = origRot
+
+      local rotThree = ConvertRotationToThreeJS origRot
+      append metadata (BuildExportMetadataRecord obj exportedName sz origPos rotThree members)
     )
 
     -- Pass 2: export ungrouped geometry
@@ -1310,11 +1222,25 @@ Icon:"MassFX\CreateHingeConstraint"
       if processedNodes[obj.inode.handle] == false then
       (
         processedNodes[obj.inode.handle] = true
+        
+        local origPos = obj.pos
+        local origRot = obj.rotation
+        
+        -- Temporarily reset rotation to get unrotated LOCAL bounding box
+        obj.rotation = quat 0 0 0 1
+        local sz = GetBoundingBoxSize #(obj)
+
+        -- Temporarily move pivot to World Origin to avoid double transforms in the exported GLB
+        obj.pos = [0,0,0]
+
         local exportedName = ExportNodesToGLB glbPath obj.name #(obj)
-        local pos = obj.pos
-        local sz  = GetBoundingBoxSize #(obj)
-        local rot = GetObjectRotationYUp #(obj)
-        append metadata (BuildExportMetadataRecord obj exportedName sz pos rot #(obj))
+        
+        -- Restore true transform back into the 3ds Max Scene
+        obj.pos = origPos
+        obj.rotation = origRot
+
+        local rotThree = ConvertRotationToThreeJS origRot
+        append metadata (BuildExportMetadataRecord obj exportedName sz origPos rotThree #(obj))
       )
     )
 
@@ -1383,9 +1309,11 @@ Icon:"MassFX\CreateHingeConstraint"
 
     group "Contact"
     (
-      label lbl_name "A-Star Group" align:#left
-      hyperlink hyp_site "https://a-star.group/" align:#left color:(color 92 216 157) hovercolor:(color 0 150 150) visitedcolor:(color 0 200 200) address:"https://a-star.group/"
+      label lbl_name "James Vella" align:#left
+      hyperlink hyp_site "www.jamesvella.net" align:#left color:(color 92 216 157) hovercolor:(color 0 150 150) visitedcolor:(color 0 200 200) address:"https://www.jamesvella.net"
       label lbl_spacer1
+      label lbl_info1 "If you like the script you can buy me a coffee :)" align:#left
+      hyperlink hyp_donate "Donate" align:#left color:(color 92 216 157) hovercolor:(color 0 150 150) visitedcolor:(color 0 200 200) address:"https://www.paypal.com/donate/?hosted_button_id=GL9MAY2KZVJBC"
     )
 
     -- ---- Open ----
